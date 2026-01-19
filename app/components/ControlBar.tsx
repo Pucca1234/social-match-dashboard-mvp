@@ -2,7 +2,9 @@ import { FilterOption, MeasurementUnit, PeriodUnit } from "../types";
 
 type ControlBarProps = {
   periodUnit: PeriodUnit;
-  periodRangeLabel: string;
+  periodRangeValue: string;
+  periodRangeOptions: { label: string; value: string }[];
+  onPeriodRangeChange: (value: string) => void;
   measurementUnit: MeasurementUnit;
   filterOptions: FilterOption[];
   filterValue: string;
@@ -13,7 +15,9 @@ type ControlBarProps = {
 
 export default function ControlBar({
   periodUnit,
-  periodRangeLabel,
+  periodRangeValue,
+  periodRangeOptions,
+  onPeriodRangeChange,
   measurementUnit,
   filterOptions,
   filterValue,
@@ -32,18 +36,22 @@ export default function ControlBar({
         </div>
         <div className="control-field">
           <label>기간범위</label>
-          <select value={periodRangeLabel} disabled>
-            <option>{periodRangeLabel}</option>
+          <select value={periodRangeValue} onChange={(event) => onPeriodRangeChange(event.target.value)}>
+            {periodRangeOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
         </div>
         <div className="control-field">
           <label>측정단위</label>
           <select value={measurementUnit} onChange={(event) => onMeasurementUnitChange(event.target.value as MeasurementUnit)}>
             <option value="all">전체</option>
-            <option value="region_group">지역그룹</option>
-            <option value="region">지역</option>
-            <option value="stadium">구장</option>
-            <option value="court">면</option>
+            <option value="area_group">Area group</option>
+            <option value="area">Area</option>
+            <option value="stadium_group">Stadium group</option>
+            <option value="stadium">Stadium</option>
           </select>
         </div>
         <div className="control-field">

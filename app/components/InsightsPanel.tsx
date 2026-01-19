@@ -16,19 +16,25 @@ type InsightsPanelProps = {
 };
 
 const unitNext: Record<MeasurementUnit, MeasurementUnit | null> = {
-  all: "region_group",
+  all: "area_group",
+  area_group: "area",
+  area: "stadium_group",
+  stadium_group: "stadium",
+  stadium: null,
   region_group: "region",
   region: "stadium",
-  stadium: "court",
   court: null
 };
 
 const unitLabel: Record<MeasurementUnit, string> = {
   all: "전체",
-  region_group: "지역그룹",
-  region: "지역",
-  stadium: "구장",
-  court: "면"
+  area_group: "Area group",
+  area: "Area",
+  stadium_group: "Stadium group",
+  stadium: "Stadium",
+  region_group: "Region group",
+  region: "Region",
+  court: "Court"
 };
 
 const getLatestDelta = (values: number[]) => {

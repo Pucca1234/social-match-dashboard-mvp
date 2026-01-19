@@ -1,59 +1,44 @@
-# Social Match Analytics Dashboard (MVP Prototype)
+﻿## 📊 Social Match Analytics Dashboard (MVP)
 
-플랩풋볼 소셜매치 데이터 탐색 흐름(이상 감지 → 원인 추적)을 검증하기 위한 MVP 프로토타입입니다.
+Supabase(BigQuery 연결)를 기반으로 한  
+소셜 매치 데이터 이상 탐지/분석용 MVP 대시보드입니다.
 
-## Goal
-- SQL 없이도 “전체 → (지역그룹/지역/구장/면) 드릴다운”으로
-  이상치를 발견하고 원인을 좁혀갈 수 있는 탐색 UX를 제공합니다.
-- 결과 하단에 종합 인사이트 + 다음 추천 드릴다운 옵션을 제공하여
-  다음 탐색 액션을 자연스럽게 유도합니다.
+---
 
-## Core UX
-- **좌측 패널:** 기간/측정단위/필터 선택 + 조회
-- **중앙:** 결과 리스트(현재 레벨) → 히트맵 테이블(주차별 지표) → 인사이트(종합) + 추천 드릴다운
-- **(우측 패널 없음)**
+## ✅ 현재 구현된 기능 (2026-01 기준)
 
-## Measurement Units & Drilldown
-고정 계층:
-- 전체 > 지역그룹 > 지역 > 구장 > 면
+### 1. 데이터 소스
+- Supabase + BigQuery 연동
+- schema: `bigquery`
+- 주요 테이블:
+  - `data_mart_1_social_match`
+  - `metric_store_native`
 
-규칙:
-- **측정단위** = 테이블 Row(집계 기준) + 드릴다운 시작점
-- **필터** = 선택한 측정단위 내에서만 값이 구성됨
-  - 예) 측정단위=지역 → 필터: 전체/서울/부산/울산...
+### 2. API 엔드포인트
+- `GET /api/weeks`
+  - 주 단위(`week`) 라벨 전체 목록 반환
+- `GET /api/metrics`
+  - 지표 사전 (metric id / 한글명 / 설명)
+- `POST /api/heatmap`
+  - 측정단위 / 필터 / 주 목록 기준 히트맵 데이터 반환
 
-## Metrics (MVP fixed set)
-- 전체 매치 수
-- 신청 매치 수
-- 진행 매치 수
-- 진행 매치율
-- 오픈 비율
-- 이탈 비율
+### 3. UI (단일 페이지)
+- 주 단위 데이터가 **우측으로 펼쳐지는 히트맵 테이블**
+- 측정단위 드릴다운 구조
+  - 전체 → Area group → Area → Stadium group → Stadium
+- 이상치 기반 점수 계산 및 정렬
+- Insights 패널 (요약 / 다음 드릴다운 제안)
 
-## Tooltip
-- 지표명(행 라벨/셀)에 hover 시 지표 정의가 tooltip으로 표시됩니다.
-- (지표 정의는 내부 metric store 기준)
+### 4. 현재 확인된 상태
+- Supabase 실데이터 정상 조회 확인
+- `/api/weeks`, `/api/metrics` 정상 응답
+- Heatmap 데이터 렌더링 정상
+- 일부 지표 값(진행률 등)이 100%로만 표시되는 현상 → **SQL 검증 예정**
 
-## Data
-현재는 더미 데이터 기반(주 10~12주, 지역그룹/지역/구장/면 샘플)으로 동작합니다.
+---
 
-## Run locally
-- 브라우저에서 `index.html`을 직접 열거나(로컬 파일 실행)
-- 간단 서버:
-  - `python -m http.server 5173` 후 `http://localhost:5173`
+## 🔧 로컬 실행 방법
 
-## Project status (현재)
-- MVP 프로토타입 UI/UX 검증 완료(드릴다운, 히트맵, 인사이트, 추천 드릴다운)
-
-## Next steps (To-do)
-1) **Supabase 연결**
-   - 테이블 구조 설계(측정단위, 차원 테이블, 주간 집계 테이블)
-   - 더미 데이터 → Supabase fetch로 교체
-   - RLS/권한 설정(내부 사용 기준)
-2) **Vercel 배포**
-   - Supabase URL/Anon Key 환경변수 연결
-   - 배포 URL 생성(사내 공유)
-3) (옵션) 지표/이상치 규칙 고도화 및 UX polish
-
-## Notes
-- 이 레포는 “탐색 흐름 검증”이 목적이며, 자동 분석/AI 추론은 MVP 범위에서 최소화했습니다.
+```bash
+npm install
+npm run dev

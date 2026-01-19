@@ -2,10 +2,13 @@ import { Entity, MeasurementUnit } from "../types";
 
 const unitLabels: Record<MeasurementUnit, string> = {
   all: "전체",
-  region_group: "지역그룹",
-  region: "지역",
-  stadium: "구장",
-  court: "면"
+  area_group: "Area group",
+  area: "Area",
+  stadium_group: "Stadium group",
+  stadium: "Stadium",
+  region_group: "Region group",
+  region: "Region",
+  court: "Court"
 };
 
 type EntityListProps = {

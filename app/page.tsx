@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import ControlBar from "./components/ControlBar";
@@ -6,52 +6,183 @@ import EntityList from "./components/EntityList";
 import HeatmapMatrix from "./components/HeatmapMatrix";
 import InsightsPanel from "./components/InsightsPanel";
 import InfoBar, { InfoPayload } from "./components/InfoBar";
-import { cube, getEntitiesByUnit, getEntitySeries } from "./data/mockCube";
 import { getAnomalyIndices, getZScores } from "./lib/anomaly";
-import { FilterOption, MeasurementUnit, PeriodUnit } from "./types";
+import { Entity, FilterOption, MeasurementUnit, Metric, PeriodUnit } from "./types";
+
+const ALL_LABEL = "전체";
+const ALL_VALUE = "all";
 
 const unitLabel: Record<MeasurementUnit, string> = {
-  all: "전체",
-  region_group: "지역그룹",
-  region: "지역",
-  stadium: "구장",
-  court: "면"
+  all: ALL_LABEL,
+  area_group: "Area group",
+  area: "Area",
+  stadium_group: "Stadium group",
+  stadium: "Stadium",
+  region_group: "Region group",
+  region: "Region",
+  court: "Court"
 };
 
-const periodRangeLabel = "최근 12주";
+const metricFormats: Record<string, Metric["format"]> = {
+  total_match_cnt: "number",
+  setting_match_cnt: "number",
+  progress_match_cnt: "number",
+  progress_match_rate: "percent",
+  match_open_rate: "percent",
+  match_loss_rate: "percent"
+};
 
-const getEntityName = (unit: MeasurementUnit, id: string) =>
-  getEntitiesByUnit(unit).find((entity) => entity.id === id)?.name;
+const periodRangeOptions = [
+  { label: "최근 8주", value: "recent_8" },
+  { label: "최근 12주", value: "recent_12" },
+  { label: "최근 24주", value: "recent_24" },
+  { label: "전체", value: "all" }
+];
+
+type MetricRow = {
+  metric: string;
+  korean_name: string;
+  description: string | null;
+};
+
+type HeatmapRow = {
+  entity: string;
+  week: string;
+  metrics: Record<string, number>;
+};
+
+const fetchJson = async <T,>(input: RequestInfo, init?: RequestInit): Promise<T> => {
+  const response = await fetch(input, init);
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(payload.error || "Request failed.");
+  }
+  return (await response.json()) as T;
+};
+
+const getMetricFormat = (metricId: string) => metricFormats[metricId] ?? "number";
 
 export default function Home() {
   const [periodUnit] = useState<PeriodUnit>("week");
+  const [periodRangeValue, setPeriodRangeValue] = useState("recent_8");
   const [measurementUnit, setMeasurementUnit] = useState<MeasurementUnit>("all");
-  const [filterValue, setFilterValue] = useState("all");
+  const [filterValue, setFilterValue] = useState(ALL_VALUE);
   const [showResults, setShowResults] = useState(false);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [infoPayload, setInfoPayload] = useState<InfoPayload>({ metric: null });
 
-  const selectedMetrics = cube.metrics;
+  const [weeks, setWeeks] = useState<string[]>([]);
+  const [metrics, setMetrics] = useState<Metric[]>([]);
+  const [filterOptions, setFilterOptions] = useState<FilterOption[]>([{ label: ALL_LABEL, value: ALL_VALUE }]);
+  const [entities, setEntities] = useState<Entity[]>([]);
+  const [seriesByEntity, setSeriesByEntity] = useState<Record<string, Record<string, number[]>>>({});
+
+  const [isLoadingBase, setIsLoadingBase] = useState(true);
+  const [isLoadingFilter, setIsLoadingFilter] = useState(false);
+  const [isLoadingHeatmap, setIsLoadingHeatmap] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const displayedWeeks = useMemo(() => {
+    if (!weeks.length) return [];
+    if (periodRangeValue === "all") return weeks;
+    const sizeMap: Record<string, number> = {
+      recent_8: 8,
+      recent_12: 12,
+      recent_24: 24
+    };
+    const size = sizeMap[periodRangeValue] ?? 8;
+    return weeks.slice(-size);
+  }, [weeks, periodRangeValue]);
+
+  useEffect(() => {
+    let canceled = false;
+
+    const loadBase = async () => {
+      setIsLoadingBase(true);
+      setErrorMessage(null);
+      try {
+        const [weeksResponse, metricsResponse] = await Promise.all([
+          fetchJson<{ weeks: string[] }>("/api/weeks"),
+          fetchJson<{ metrics: MetricRow[] }>("/api/metrics")
+        ]);
+
+        if (canceled) return;
+
+        const loadedWeeks = weeksResponse.weeks ?? [];
+        setWeeks(loadedWeeks);
+        const mappedMetrics = (metricsResponse.metrics ?? []).map((row) => ({
+          id: row.metric,
+          name: row.korean_name || row.metric,
+          description: row.description || "",
+          format: getMetricFormat(row.metric)
+        }));
+        setMetrics(mappedMetrics);
+      } catch (error) {
+        if (!canceled) setErrorMessage((error as Error).message);
+      } finally {
+        if (!canceled) setIsLoadingBase(false);
+      }
+    };
+
+    loadBase();
+
+    return () => {
+      canceled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let canceled = false;
+
+    const loadFilters = async () => {
+      const apiUnit =
+        measurementUnit === "all" ||
+        measurementUnit === "area_group" ||
+        measurementUnit === "area" ||
+        measurementUnit === "stadium_group" ||
+        measurementUnit === "stadium"
+          ? measurementUnit
+          : "all";
+
+      setIsLoadingFilter(true);
+      setErrorMessage(null);
+      try {
+        const response = await fetchJson<{ options: string[] }>(
+          `/api/filter-options?measureUnit=${apiUnit}`
+        );
+        if (canceled) return;
+
+        const options = response.options ?? [];
+        if (apiUnit === "all") {
+          setFilterOptions([{ label: ALL_LABEL, value: ALL_VALUE }]);
+        } else {
+          setFilterOptions([
+            { label: ALL_LABEL, value: ALL_VALUE },
+            ...options.map((value) => ({ label: value, value }))
+          ]);
+        }
+      } catch (error) {
+        if (!canceled) setErrorMessage((error as Error).message);
+      } finally {
+        if (!canceled) setIsLoadingFilter(false);
+      }
+    };
+
+    loadFilters();
+
+    return () => {
+      canceled = true;
+    };
+  }, [measurementUnit]);
 
   const measurementEntities = useMemo(() => {
     if (measurementUnit === "all") return [];
-    return getEntitiesByUnit(measurementUnit);
-  }, [measurementUnit]);
-
-  const filterOptions = useMemo<FilterOption[]>(() => {
-    // 측정단위(집계 기준)와 필터(동일 레벨 범위 제한)를 분리해 옵션 혼선을 방지한다.
-    if (measurementUnit === "all") {
-      return [{ label: "전체", value: "all" }];
-    }
-    return [
-      { label: "전체", value: "all" },
-      ...measurementEntities.map((entity) => ({ label: entity.name, value: entity.id }))
-    ];
-  }, [measurementUnit, measurementEntities]);
+    return entities;
+  }, [measurementUnit, entities]);
 
   const entityList = useMemo(() => {
     if (measurementUnit === "all") return [];
-    if (filterValue === "all") return measurementEntities;
+    if (filterValue === ALL_VALUE) return measurementEntities;
     return measurementEntities.filter((entity) => entity.id === filterValue);
   }, [measurementUnit, filterValue, measurementEntities]);
 
@@ -61,19 +192,19 @@ export default function Home() {
 
     return entityList
       .map((entity) => {
-        const series = getEntitySeries(entity);
+        const series = seriesByEntity[entity.id] ?? {};
         let maxAbsZ = 0;
         let topMetricName = "";
         let anomalyIndices: number[] = [];
 
-        selectedMetrics.forEach((metric) => {
-          const values = series.metrics[metric.id] ?? [];
+        metrics.forEach((metric) => {
+          const values = series[metric.id] ?? [];
           const zscores = getZScores(values);
           const anomalies = getAnomalyIndices(values);
           anomalies.forEach((index) => {
             if (!anomalyIndices.includes(index)) anomalyIndices.push(index);
           });
-          const localMax = Math.max(...zscores.map((value) => Math.abs(value)));
+          const localMax = zscores.length ? Math.max(...zscores.map((value) => Math.abs(value))) : 0;
           if (localMax > maxAbsZ) {
             maxAbsZ = localMax;
             topMetricName = metric.name;
@@ -82,27 +213,27 @@ export default function Home() {
 
         anomalyIndices = anomalyIndices.sort((a, b) => a - b);
         const score = Math.min(100, maxAbsZ * 22 + anomalyIndices.length * 6);
-        const anomalyWeeks = anomalyIndices.slice(-3).map((index) => cube.weeks[index]);
+        const anomalyWeeks = anomalyIndices.slice(-3).map((index) => displayedWeeks[index]);
 
         return {
           entity,
           anomalyScore: score,
-          topMetric: topMetricName || selectedMetrics[0]?.name || "-",
+          topMetric: topMetricName || metrics[0]?.name || "-",
           anomalyWeeks,
           anomalyIndices
         };
       })
       .sort((a, b) => b.anomalyScore - a.anomalyScore);
-  }, [showResults, measurementUnit, entityList, selectedMetrics]);
+  }, [showResults, measurementUnit, entityList, metrics, seriesByEntity, displayedWeeks]);
 
   useEffect(() => {
     if (!showResults) return;
     if (measurementUnit === "all") {
-      setSelectedEntityId("all");
+      setSelectedEntityId(ALL_LABEL);
       setInfoPayload({ metric: null });
       return;
     }
-    if (filterValue !== "all") {
+    if (filterValue !== ALL_VALUE) {
       setSelectedEntityId(filterValue);
       setInfoPayload({ metric: null });
       return;
@@ -112,91 +243,151 @@ export default function Home() {
     setInfoPayload({ metric: null });
   }, [showResults, measurementUnit, filterValue, entityListData]);
 
+  const buildSeriesMap = (rows: HeatmapRow[]) => {
+    const weekIndex = new Map(displayedWeeks.map((week, index) => [week, index]));
+    const nextEntities: Entity[] = [];
+    const nextSeries: Record<string, Record<string, number[]>> = {};
+
+    rows.forEach((row) => {
+      if (!weekIndex.has(row.week)) return;
+      const entityKey = row.entity || ALL_LABEL;
+
+      if (!nextSeries[entityKey]) {
+        nextSeries[entityKey] = {};
+        metrics.forEach((metric) => {
+          nextSeries[entityKey][metric.id] = Array(displayedWeeks.length).fill(0);
+        });
+        nextEntities.push({ id: entityKey, name: entityKey, unit: measurementUnit });
+      }
+
+      const series = nextSeries[entityKey];
+      metrics.forEach((metric) => {
+        const value = row.metrics[metric.id];
+        series[metric.id][weekIndex.get(row.week) ?? 0] = typeof value === "number" ? value : 0;
+      });
+    });
+
+    setEntities(nextEntities);
+    setSeriesByEntity(nextSeries);
+  };
+
+  const loadHeatmap = async () => {
+    if (!displayedWeeks.length || !metrics.length) {
+      setErrorMessage("Weeks or metrics are not loaded yet.");
+      return;
+    }
+
+    const apiUnit =
+      measurementUnit === "all" ||
+      measurementUnit === "area_group" ||
+      measurementUnit === "area" ||
+      measurementUnit === "stadium_group" ||
+      measurementUnit === "stadium"
+        ? measurementUnit
+        : "all";
+
+    setIsLoadingHeatmap(true);
+    setErrorMessage(null);
+    try {
+      const response = await fetchJson<{ rows: HeatmapRow[] }>("/api/heatmap", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          measureUnit: apiUnit,
+          filterValue: filterValue === ALL_VALUE ? null : filterValue,
+          weeks: displayedWeeks
+        })
+      });
+      buildSeriesMap(response.rows ?? []);
+    } catch (error) {
+      setErrorMessage((error as Error).message);
+    } finally {
+      setIsLoadingHeatmap(false);
+    }
+  };
+
   const handleSearch = () => {
     setShowResults(true);
     setInfoPayload({ metric: null });
+    loadHeatmap();
   };
 
   const handleMeasurementChange = (value: MeasurementUnit) => {
-    // 측정단위 변경 시 필터는 초기화된다.
     setMeasurementUnit(value);
-    setFilterValue("all");
+    setFilterValue(ALL_VALUE);
     setSelectedEntityId(null);
     setInfoPayload({ metric: null });
+    setShowResults(false);
   };
 
   const handleFilterChange = (value: string) => {
     setFilterValue(value);
     setSelectedEntityId(null);
     setInfoPayload({ metric: null });
+    setShowResults(false);
+  };
+
+  const handlePeriodRangeChange = (value: string) => {
+    setPeriodRangeValue(value);
+    setSelectedEntityId(null);
+    setInfoPayload({ metric: null });
+    setShowResults(false);
   };
 
   const handleDrilldown = (nextUnit: MeasurementUnit) => {
-    // 드릴다운은 하위 단계로만 이동하며 필터는 동일 레벨 기준으로 다시 시작한다.
     setMeasurementUnit(nextUnit);
-    setFilterValue("all");
+    setFilterValue(ALL_VALUE);
     setSelectedEntityId(null);
     setInfoPayload({ metric: null });
+    setShowResults(false);
   };
 
   const handleRecommend = (nextUnit: MeasurementUnit) => {
-    // 추천 드릴다운은 측정단위를 전환하고 필터는 전체로 초기화한다.
     setMeasurementUnit(nextUnit);
-    setFilterValue("all");
+    setFilterValue(ALL_VALUE);
     setSelectedEntityId(null);
     setInfoPayload({ metric: null });
+    setShowResults(false);
   };
 
   const breadcrumbLabel = useMemo(() => {
-    if (measurementUnit === "all") return "전체";
-    if (!selectedEntityId) return `전체 > ${unitLabel[measurementUnit]}`;
-
-    if (measurementUnit === "region_group") {
-      return `전체 > ${getEntityName("region_group", selectedEntityId)}`;
-    }
-    if (measurementUnit === "region") {
-      const region = getEntitiesByUnit("region").find((item) => item.id === selectedEntityId);
-      const groupName = region?.regionGroupId ? getEntityName("region_group", region.regionGroupId) : "지역그룹";
-      return `전체 > ${groupName} > ${region?.name ?? "지역"}`;
-    }
-    if (measurementUnit === "stadium") {
-      const stadium = getEntitiesByUnit("stadium").find((item) => item.id === selectedEntityId);
-      const regionName = stadium?.regionId ? getEntityName("region", stadium.regionId) : "지역";
-      const groupName = stadium?.regionGroupId ? getEntityName("region_group", stadium.regionGroupId) : "지역그룹";
-      return `전체 > ${groupName} > ${regionName} > ${stadium?.name ?? "구장"}`;
-    }
-    const court = getEntitiesByUnit("court").find((item) => item.id === selectedEntityId);
-    const stadiumName = court?.stadiumId ? getEntityName("stadium", court.stadiumId) : "구장";
-    const regionName = court?.regionId ? getEntityName("region", court.regionId) : "지역";
-    const groupName = court?.regionGroupId ? getEntityName("region_group", court.regionGroupId) : "지역그룹";
-    return `전체 > ${groupName} > ${regionName} > ${stadiumName} > ${court?.name ?? "면"}`;
+    if (measurementUnit === "all") return ALL_LABEL;
+    if (!selectedEntityId) return `${ALL_LABEL} > ${unitLabel[measurementUnit]}`;
+    return `${ALL_LABEL} > ${unitLabel[measurementUnit]} > ${selectedEntityId}`;
   }, [measurementUnit, selectedEntityId]);
 
   const renderHeatmap = () => {
+    if (isLoadingHeatmap) {
+      return <div className="empty-state">Loading heatmap...</div>;
+    }
+
     if (measurementUnit === "all") {
-      const entity = getEntitiesByUnit("all")[0];
-      const series = getEntitySeries(entity);
+      const series = seriesByEntity[ALL_LABEL] ?? {};
+      if (!Object.keys(series).length) {
+        return <div className="empty-state">No data.</div>;
+      }
       return (
         <HeatmapMatrix
-          title="전체"
-          weeks={cube.weeks}
-          metrics={selectedMetrics}
-          series={series.metrics}
+          title={ALL_LABEL}
+          weeks={displayedWeeks}
+          metrics={metrics}
+          series={series}
           onInfoChange={setInfoPayload}
         />
       );
     }
 
-    if (!selectedEntityId) return <div className="empty-state">대상을 선택하세요.</div>;
-    const entity = getEntitiesByUnit(measurementUnit).find((item) => item.id === selectedEntityId);
-    if (!entity) return <div className="empty-state">대상을 선택하세요.</div>;
-    const series = getEntitySeries(entity);
+    if (!selectedEntityId) return <div className="empty-state">Select an entity.</div>;
+    const series = seriesByEntity[selectedEntityId];
+    if (!series) return <div className="empty-state">Select an entity.</div>;
     return (
       <HeatmapMatrix
-        title={`${unitLabel[measurementUnit]} · ${entity.name}`}
-        weeks={cube.weeks}
-        metrics={selectedMetrics}
-        series={series.metrics}
+        title={`${unitLabel[measurementUnit]} · ${selectedEntityId}`}
+        weeks={displayedWeeks}
+        metrics={metrics}
+        series={series}
         onInfoChange={setInfoPayload}
       />
     );
@@ -204,30 +395,32 @@ export default function Home() {
 
   const insightsSeries = useMemo(() => {
     if (measurementUnit === "all") {
-      const entity = getEntitiesByUnit("all")[0];
-      return getEntitySeries(entity);
+      return seriesByEntity[ALL_LABEL] ?? null;
     }
-    const entity = getEntitiesByUnit(measurementUnit).find((item) => item.id === selectedEntityId);
-    return entity ? getEntitySeries(entity) : null;
-  }, [measurementUnit, selectedEntityId]);
+    return selectedEntityId ? seriesByEntity[selectedEntityId] ?? null : null;
+  }, [measurementUnit, selectedEntityId, seriesByEntity]);
 
-  const insightsTitle = insightsSeries?.entity.name ?? "선택 없음";
+  const insightsTitle =
+    measurementUnit === "all"
+      ? ALL_LABEL
+      : selectedEntityId || unitLabel[measurementUnit] || "-";
 
   return (
     <main>
       <div className="page-header">
-        <h1 className="page-title">소셜매치 분석 대시보드</h1>
-        <p className="page-subtitle">탐색 흐름 검증을 위한 MVP 프로토타입</p>
+        <h1 className="page-title">Social Match Analytics Dashboard</h1>
+        <p className="page-subtitle">MVP dashboard powered by Supabase data.</p>
       </div>
 
-      {/* 좌/중 2단 레이아웃 */}
       <section className="dashboard-layout">
         <aside className="sidebar left-panel">
           <div className="panel sidebar-panel">
-            <div className="panel-title">검색 옵션</div>
+            <div className="panel-title">Search Options</div>
             <ControlBar
               periodUnit={periodUnit}
-              periodRangeLabel={periodRangeLabel}
+              periodRangeValue={periodRangeValue}
+              periodRangeOptions={periodRangeOptions}
+              onPeriodRangeChange={handlePeriodRangeChange}
               measurementUnit={measurementUnit}
               filterOptions={filterOptions}
               filterValue={filterValue}
@@ -235,12 +428,16 @@ export default function Home() {
               onFilterChange={handleFilterChange}
               onSearch={handleSearch}
             />
+            {isLoadingFilter && <div className="empty-state">Loading filters...</div>}
           </div>
         </aside>
 
         <div className="content-area">
-          {!showResults ? (
-            <section className="empty-state">조건을 선택한 뒤 조회하기를 눌러 결과를 확인하세요.</section>
+          {errorMessage && <div className="empty-state">Error: {errorMessage}</div>}
+          {isLoadingBase ? (
+            <section className="empty-state">Loading data...</section>
+          ) : !showResults ? (
+            <section className="empty-state">Select conditions and search.</section>
           ) : (
             <div className="left-stack">
               <div className="breadcrumb">{breadcrumbLabel}</div>
@@ -251,17 +448,17 @@ export default function Home() {
                   selectedId={selectedEntityId ?? undefined}
                   onSelect={(entity) => setSelectedEntityId(entity.id)}
                   onDrilldown={
-                    measurementUnit === "court"
+                    measurementUnit === "stadium"
                       ? undefined
-                      : (entity) => {
-                          if (measurementUnit === "region_group") {
-                            handleDrilldown("region");
+                      : () => {
+                          if (measurementUnit === "area_group") {
+                            handleDrilldown("area");
                           }
-                          if (measurementUnit === "region") {
+                          if (measurementUnit === "area") {
+                            handleDrilldown("stadium_group");
+                          }
+                          if (measurementUnit === "stadium_group") {
                             handleDrilldown("stadium");
-                          }
-                          if (measurementUnit === "stadium") {
-                            handleDrilldown("court");
                           }
                         }
                   }
@@ -271,12 +468,11 @@ export default function Home() {
               <div className="heatmap-section">
                 <InfoBar info={infoPayload} />
                 {renderHeatmap()}
-                {/* 우측바 제거: 인사이트는 테이블 하단으로 이동 */}
                 <InsightsPanel
                   targetLabel={`${unitLabel[measurementUnit]} ${insightsTitle}`}
-                  weeks={cube.weeks}
-                  metrics={selectedMetrics}
-                  series={insightsSeries?.metrics ?? {}}
+                  weeks={displayedWeeks}
+                  metrics={metrics}
+                  series={insightsSeries ?? {}}
                   measurementUnit={measurementUnit}
                   onRecommend={handleRecommend}
                 />

@@ -1,6 +1,14 @@
 export type PeriodUnit = "week";
 
-export type MeasurementUnit = "all" | "region_group" | "region" | "stadium" | "court";
+export type MeasurementUnit =
+  | "all"
+  | "area_group"
+  | "area"
+  | "stadium_group"
+  | "stadium"
+  | "region_group"
+  | "region"
+  | "court";
 
 export type Metric = {
   id: string;
