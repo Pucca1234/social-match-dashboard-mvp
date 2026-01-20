@@ -1,12 +1,10 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ControlBar from "./components/ControlBar";
-import EntityList from "./components/EntityList";
-import HeatmapMatrix from "./components/HeatmapMatrix";
-import InsightsPanel from "./components/InsightsPanel";
-import InfoBar, { InfoPayload } from "./components/InfoBar";
-import { getAnomalyIndices, getZScores } from "./lib/anomaly";
+import MetricTable from "./components/MetricTable";
+import EntityMetricTable from "./components/EntityMetricTable";
+import ErrorLogPanel, { ErrorLogItem } from "./components/ErrorLogPanel";
 import { Entity, FilterOption, MeasurementUnit, Metric, PeriodUnit } from "./types";
 
 const ALL_LABEL = "전체";
@@ -14,13 +12,13 @@ const ALL_VALUE = "all";
 
 const unitLabel: Record<MeasurementUnit, string> = {
   all: ALL_LABEL,
-  area_group: "Area group",
-  area: "Area",
-  stadium_group: "Stadium group",
-  stadium: "Stadium",
-  region_group: "Region group",
-  region: "Region",
-  court: "Court"
+  area_group: "지역 그룹",
+  area: "지역",
+  stadium_group: "구장 그룹",
+  stadium: "구장",
+  region_group: "권역 그룹",
+  region: "권역",
+  court: "면"
 };
 
 const metricFormats: Record<string, Metric["format"]> = {
@@ -38,6 +36,13 @@ const periodRangeOptions = [
   { label: "최근 24주", value: "recent_24" },
   { label: "전체", value: "all" }
 ];
+
+const periodRangeSizeMap: Record<string, number> = {
+  recent_8: 8,
+  recent_12: 12,
+  recent_24: 24,
+  all: 104
+};
 
 type MetricRow = {
   metric: string;
@@ -67,64 +72,94 @@ export default function Home() {
   const [periodRangeValue, setPeriodRangeValue] = useState("recent_8");
   const [measurementUnit, setMeasurementUnit] = useState<MeasurementUnit>("all");
   const [filterValue, setFilterValue] = useState(ALL_VALUE);
-  const [showResults, setShowResults] = useState(false);
-  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
-  const [infoPayload, setInfoPayload] = useState<InfoPayload>({ metric: null });
+
+  const [metrics, setMetrics] = useState<Metric[]>([]);
+  const [selectedMetricIds, setSelectedMetricIds] = useState<string[]>([]);
+  const [primaryMetricId, setPrimaryMetricId] = useState<string>("");
 
   const [weeks, setWeeks] = useState<string[]>([]);
-  const [metrics, setMetrics] = useState<Metric[]>([]);
-  const [filterOptions, setFilterOptions] = useState<FilterOption[]>([{ label: ALL_LABEL, value: ALL_VALUE }]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [seriesByEntity, setSeriesByEntity] = useState<Record<string, Record<string, number[]>>>({});
 
+  const [filterOptions, setFilterOptions] = useState<FilterOption[]>([{ label: ALL_LABEL, value: ALL_VALUE }]);
+
+  const [showResults, setShowResults] = useState(false);
   const [isLoadingBase, setIsLoadingBase] = useState(true);
   const [isLoadingFilter, setIsLoadingFilter] = useState(false);
   const [isLoadingHeatmap, setIsLoadingHeatmap] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const displayedWeeks = useMemo(() => {
-    if (!weeks.length) return [];
-    if (periodRangeValue === "all") return weeks;
-    const sizeMap: Record<string, number> = {
-      recent_8: 8,
-      recent_12: 12,
-      recent_24: 24
+  const [errorLogs, setErrorLogs] = useState<ErrorLogItem[]>([]);
+  const [isErrorLogOpen, setIsErrorLogOpen] = useState(false);
+  const [isFetching, setIsFetching] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const pushError = (message: string, detail?: string) => {
+    setErrorLogs((prev) => {
+      const next: ErrorLogItem[] = [
+        {
+          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          message,
+          detail,
+          time: new Date().toLocaleString("ko-KR")
+        },
+        ...prev
+      ];
+      return next.slice(0, 50);
+    });
+  };
+
+  useEffect(() => {
+    const originalError = console.error;
+    const safeStringify = (value: unknown) => {
+      if (typeof value === "string") return value;
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
     };
-    const size = sizeMap[periodRangeValue] ?? 8;
-    return weeks.slice(-size);
-  }, [weeks, periodRangeValue]);
+    console.error = (...args) => {
+      originalError(...args);
+      const detail = args.map((arg) => safeStringify(arg)).join(" ");
+      pushError("Console error", detail);
+    };
+    return () => {
+      console.error = originalError;
+    };
+  }, []);
 
   useEffect(() => {
     let canceled = false;
 
-    const loadBase = async () => {
+    const loadMetrics = async () => {
       setIsLoadingBase(true);
       setErrorMessage(null);
       try {
-        const [weeksResponse, metricsResponse] = await Promise.all([
-          fetchJson<{ weeks: string[] }>("/api/weeks"),
-          fetchJson<{ metrics: MetricRow[] }>("/api/metrics")
-        ]);
-
+        const response = await fetchJson<{ metrics: MetricRow[] }>("/api/metrics");
         if (canceled) return;
-
-        const loadedWeeks = weeksResponse.weeks ?? [];
-        setWeeks(loadedWeeks);
-        const mappedMetrics = (metricsResponse.metrics ?? []).map((row) => ({
+        const mappedMetrics = (response.metrics ?? []).map((row) => ({
           id: row.metric,
           name: row.korean_name || row.metric,
           description: row.description || "",
           format: getMetricFormat(row.metric)
         }));
         setMetrics(mappedMetrics);
+        const defaultIds = mappedMetrics.map((metric) => metric.id);
+        setSelectedMetricIds(defaultIds);
+        setPrimaryMetricId(mappedMetrics[0]?.id ?? "");
       } catch (error) {
-        if (!canceled) setErrorMessage((error as Error).message);
+        if (!canceled) {
+          const message = (error as Error).message;
+          setErrorMessage(message);
+          pushError("지표 정보를 불러오지 못했습니다.", message);
+        }
       } finally {
         if (!canceled) setIsLoadingBase(false);
       }
     };
 
-    loadBase();
+    loadMetrics();
 
     return () => {
       canceled = true;
@@ -132,37 +167,45 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!metrics.length) return;
+    if (!selectedMetricIds.length) {
+      setSelectedMetricIds(metrics.map((metric) => metric.id));
+      return;
+    }
+    if (primaryMetricId && selectedMetricIds.includes(primaryMetricId)) return;
+    const fallback = selectedMetricIds[0] ?? metrics[0]?.id ?? "";
+    if (fallback) setPrimaryMetricId(fallback);
+  }, [metrics, selectedMetricIds, primaryMetricId]);
+
+  useEffect(() => {
     let canceled = false;
 
     const loadFilters = async () => {
-      const apiUnit =
-        measurementUnit === "all" ||
-        measurementUnit === "area_group" ||
-        measurementUnit === "area" ||
-        measurementUnit === "stadium_group" ||
-        measurementUnit === "stadium"
-          ? measurementUnit
-          : "all";
+      if (measurementUnit === "all") {
+        setFilterOptions([{ label: ALL_LABEL, value: ALL_VALUE }]);
+        setFilterValue(ALL_VALUE);
+        return;
+      }
 
       setIsLoadingFilter(true);
       setErrorMessage(null);
       try {
         const response = await fetchJson<{ options: string[] }>(
-          `/api/filter-options?measureUnit=${apiUnit}`
+          `/api/filter-options?measureUnit=${measurementUnit}`
         );
         if (canceled) return;
 
         const options = response.options ?? [];
-        if (apiUnit === "all") {
-          setFilterOptions([{ label: ALL_LABEL, value: ALL_VALUE }]);
-        } else {
-          setFilterOptions([
-            { label: ALL_LABEL, value: ALL_VALUE },
-            ...options.map((value) => ({ label: value, value }))
-          ]);
-        }
+        setFilterOptions([
+          { label: ALL_LABEL, value: ALL_VALUE },
+          ...options.map((value) => ({ label: value, value }))
+        ]);
       } catch (error) {
-        if (!canceled) setErrorMessage((error as Error).message);
+        if (!canceled) {
+          const message = (error as Error).message;
+          setErrorMessage(message);
+          pushError("필터 옵션을 불러오지 못했습니다.", message);
+        }
       } finally {
         if (!canceled) setIsLoadingFilter(false);
       }
@@ -175,76 +218,13 @@ export default function Home() {
     };
   }, [measurementUnit]);
 
-  const measurementEntities = useMemo(() => {
-    if (measurementUnit === "all") return [];
-    return entities;
-  }, [measurementUnit, entities]);
+  const selectedMetrics = useMemo(() => {
+    const map = new Map(metrics.map((metric) => [metric.id, metric]));
+    return selectedMetricIds.map((id) => map.get(id)).filter(Boolean) as Metric[];
+  }, [metrics, selectedMetricIds]);
 
-  const entityList = useMemo(() => {
-    if (measurementUnit === "all") return [];
-    if (filterValue === ALL_VALUE) return measurementEntities;
-    return measurementEntities.filter((entity) => entity.id === filterValue);
-  }, [measurementUnit, filterValue, measurementEntities]);
-
-  const entityListData = useMemo(() => {
-    if (!showResults) return [];
-    if (measurementUnit === "all") return [];
-
-    return entityList
-      .map((entity) => {
-        const series = seriesByEntity[entity.id] ?? {};
-        let maxAbsZ = 0;
-        let topMetricName = "";
-        let anomalyIndices: number[] = [];
-
-        metrics.forEach((metric) => {
-          const values = series[metric.id] ?? [];
-          const zscores = getZScores(values);
-          const anomalies = getAnomalyIndices(values);
-          anomalies.forEach((index) => {
-            if (!anomalyIndices.includes(index)) anomalyIndices.push(index);
-          });
-          const localMax = zscores.length ? Math.max(...zscores.map((value) => Math.abs(value))) : 0;
-          if (localMax > maxAbsZ) {
-            maxAbsZ = localMax;
-            topMetricName = metric.name;
-          }
-        });
-
-        anomalyIndices = anomalyIndices.sort((a, b) => a - b);
-        const score = Math.min(100, maxAbsZ * 22 + anomalyIndices.length * 6);
-        const anomalyWeeks = anomalyIndices.slice(-3).map((index) => displayedWeeks[index]);
-
-        return {
-          entity,
-          anomalyScore: score,
-          topMetric: topMetricName || metrics[0]?.name || "-",
-          anomalyWeeks,
-          anomalyIndices
-        };
-      })
-      .sort((a, b) => b.anomalyScore - a.anomalyScore);
-  }, [showResults, measurementUnit, entityList, metrics, seriesByEntity, displayedWeeks]);
-
-  useEffect(() => {
-    if (!showResults) return;
-    if (measurementUnit === "all") {
-      setSelectedEntityId(ALL_LABEL);
-      setInfoPayload({ metric: null });
-      return;
-    }
-    if (filterValue !== ALL_VALUE) {
-      setSelectedEntityId(filterValue);
-      setInfoPayload({ metric: null });
-      return;
-    }
-    if (!entityListData.length) return;
-    setSelectedEntityId(entityListData[0].entity.id);
-    setInfoPayload({ metric: null });
-  }, [showResults, measurementUnit, filterValue, entityListData]);
-
-  const buildSeriesMap = (rows: HeatmapRow[]) => {
-    const weekIndex = new Map(displayedWeeks.map((week, index) => [week, index]));
+  const buildSeriesMap = (rows: HeatmapRow[], metricIds: string[], weekLabels: string[]) => {
+    const weekIndex = new Map(weekLabels.map((week, index) => [week, index]));
     const nextEntities: Entity[] = [];
     const nextSeries: Record<string, Record<string, number[]>> = {};
 
@@ -254,16 +234,16 @@ export default function Home() {
 
       if (!nextSeries[entityKey]) {
         nextSeries[entityKey] = {};
-        metrics.forEach((metric) => {
-          nextSeries[entityKey][metric.id] = Array(displayedWeeks.length).fill(0);
+        metricIds.forEach((metric) => {
+          nextSeries[entityKey][metric] = Array(weekLabels.length).fill(0);
         });
         nextEntities.push({ id: entityKey, name: entityKey, unit: measurementUnit });
       }
 
       const series = nextSeries[entityKey];
-      metrics.forEach((metric) => {
-        const value = row.metrics[metric.id];
-        series[metric.id][weekIndex.get(row.week) ?? 0] = typeof value === "number" ? value : 0;
+      metricIds.forEach((metric) => {
+        const value = row.metrics[metric];
+        series[metric][weekIndex.get(row.week) ?? 0] = typeof value === "number" ? value : Number(value ?? 0);
       });
     });
 
@@ -271,145 +251,98 @@ export default function Home() {
     setSeriesByEntity(nextSeries);
   };
 
-  const loadHeatmap = async () => {
-    if (!displayedWeeks.length || !metrics.length) {
-      setErrorMessage("Weeks or metrics are not loaded yet.");
+  const handleSearch = async () => {
+    if (!selectedMetricIds.length) {
+      setErrorMessage("지표를 최소 1개 선택해주세요.");
+      pushError("지표를 최소 1개 선택해주세요.");
+      return;
+    }
+    if (!primaryMetricId) {
+      setErrorMessage("핵심 지표를 선택해주세요.");
+      pushError("핵심 지표를 선택해주세요.");
       return;
     }
 
-    const apiUnit =
-      measurementUnit === "all" ||
-      measurementUnit === "area_group" ||
-      measurementUnit === "area" ||
-      measurementUnit === "stadium_group" ||
-      measurementUnit === "stadium"
-        ? measurementUnit
-        : "all";
+    if (abortRef.current) {
+      abortRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
 
+    const size = periodRangeSizeMap[periodRangeValue] ?? 8;
     setIsLoadingHeatmap(true);
+    setIsFetching(true);
     setErrorMessage(null);
+
     try {
+      const weeksResponse = await fetchJson<{ weeks: string[] }>(`/api/weeks?n=${size}`, {
+        signal: controller.signal
+      });
+      const nextWeeks = (weeksResponse.weeks ?? []).slice().reverse();
+      if (!nextWeeks.length) {
+        setErrorMessage("조건에 맞는 주차 데이터가 없습니다.");
+        pushError("조건에 맞는 주차 데이터가 없습니다.");
+        setIsLoadingHeatmap(false);
+        setIsFetching(false);
+        return;
+      }
+
+      setWeeks(nextWeeks);
+
       const response = await fetchJson<{ rows: HeatmapRow[] }>("/api/heatmap", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
+        signal: controller.signal,
         body: JSON.stringify({
-          measureUnit: apiUnit,
+          measureUnit: measurementUnit,
           filterValue: filterValue === ALL_VALUE ? null : filterValue,
-          weeks: displayedWeeks
+          weeks: nextWeeks,
+          metrics: selectedMetricIds,
+          primaryMetricId
         })
       });
-      buildSeriesMap(response.rows ?? []);
+
+      buildSeriesMap(response.rows ?? [], selectedMetricIds, nextWeeks);
+      setShowResults(true);
     } catch (error) {
-      setErrorMessage((error as Error).message);
+      if ((error as Error).name === "AbortError") {
+        pushError("Request canceled");
+      } else {
+        const message = (error as Error).message;
+        setErrorMessage(message);
+        pushError("데이터 조회 실패", message);
+      }
     } finally {
       setIsLoadingHeatmap(false);
+      setIsFetching(false);
     }
-  };
-
-  const handleSearch = () => {
-    setShowResults(true);
-    setInfoPayload({ metric: null });
-    loadHeatmap();
   };
 
   const handleMeasurementChange = (value: MeasurementUnit) => {
     setMeasurementUnit(value);
     setFilterValue(ALL_VALUE);
-    setSelectedEntityId(null);
-    setInfoPayload({ metric: null });
     setShowResults(false);
   };
 
   const handleFilterChange = (value: string) => {
     setFilterValue(value);
-    setSelectedEntityId(null);
-    setInfoPayload({ metric: null });
     setShowResults(false);
   };
 
   const handlePeriodRangeChange = (value: string) => {
     setPeriodRangeValue(value);
-    setSelectedEntityId(null);
-    setInfoPayload({ metric: null });
     setShowResults(false);
   };
 
-  const handleDrilldown = (nextUnit: MeasurementUnit) => {
-    setMeasurementUnit(nextUnit);
-    setFilterValue(ALL_VALUE);
-    setSelectedEntityId(null);
-    setInfoPayload({ metric: null });
-    setShowResults(false);
-  };
-
-  const handleRecommend = (nextUnit: MeasurementUnit) => {
-    setMeasurementUnit(nextUnit);
-    setFilterValue(ALL_VALUE);
-    setSelectedEntityId(null);
-    setInfoPayload({ metric: null });
-    setShowResults(false);
-  };
-
-  const breadcrumbLabel = useMemo(() => {
-    if (measurementUnit === "all") return ALL_LABEL;
-    if (!selectedEntityId) return `${ALL_LABEL} > ${unitLabel[measurementUnit]}`;
-    return `${ALL_LABEL} > ${unitLabel[measurementUnit]} > ${selectedEntityId}`;
-  }, [measurementUnit, selectedEntityId]);
-
-  const renderHeatmap = () => {
-    if (isLoadingHeatmap) {
-      return <div className="empty-state">Loading heatmap...</div>;
-    }
-
-    if (measurementUnit === "all") {
-      const series = seriesByEntity[ALL_LABEL] ?? {};
-      if (!Object.keys(series).length) {
-        return <div className="empty-state">No data.</div>;
-      }
-      return (
-        <HeatmapMatrix
-          title={ALL_LABEL}
-          weeks={displayedWeeks}
-          metrics={metrics}
-          series={series}
-          onInfoChange={setInfoPayload}
-        />
-      );
-    }
-
-    if (!selectedEntityId) return <div className="empty-state">Select an entity.</div>;
-    const series = seriesByEntity[selectedEntityId];
-    if (!series) return <div className="empty-state">Select an entity.</div>;
-    return (
-      <HeatmapMatrix
-        title={`${unitLabel[measurementUnit]} · ${selectedEntityId}`}
-        weeks={displayedWeeks}
-        metrics={metrics}
-        series={series}
-        onInfoChange={setInfoPayload}
-      />
-    );
-  };
-
-  const insightsSeries = useMemo(() => {
-    if (measurementUnit === "all") {
-      return seriesByEntity[ALL_LABEL] ?? null;
-    }
-    return selectedEntityId ? seriesByEntity[selectedEntityId] ?? null : null;
-  }, [measurementUnit, selectedEntityId, seriesByEntity]);
-
-  const insightsTitle =
-    measurementUnit === "all"
-      ? ALL_LABEL
-      : selectedEntityId || unitLabel[measurementUnit] || "-";
+  const isSearchDisabled = isLoadingBase || isLoadingHeatmap;
 
   return (
     <main>
       <div className="page-header">
-        <h1 className="page-title">Social Match Analytics Dashboard</h1>
-        <p className="page-subtitle">MVP dashboard powered by Supabase data.</p>
+        <h1 className="page-title">Kevin</h1>
+        <p className="page-subtitle">Social match analytics dashboard MVP.</p>
       </div>
 
       <section className="dashboard-layout">
@@ -422,65 +355,84 @@ export default function Home() {
               periodRangeOptions={periodRangeOptions}
               onPeriodRangeChange={handlePeriodRangeChange}
               measurementUnit={measurementUnit}
+              onMeasurementUnitChange={handleMeasurementChange}
               filterOptions={filterOptions}
               filterValue={filterValue}
-              onMeasurementUnitChange={handleMeasurementChange}
               onFilterChange={handleFilterChange}
+              metrics={metrics}
+              selectedMetricIds={selectedMetricIds}
+              primaryMetricId={primaryMetricId}
+              onSelectedMetricIdsChange={setSelectedMetricIds}
+              onPrimaryMetricChange={setPrimaryMetricId}
               onSearch={handleSearch}
+              isSearchDisabled={isSearchDisabled}
             />
-            {isLoadingFilter && <div className="empty-state">Loading filters...</div>}
+            {isLoadingFilter && <div className="empty-state">필터 로딩 중...</div>}
           </div>
         </aside>
 
         <div className="content-area">
           {errorMessage && <div className="empty-state">Error: {errorMessage}</div>}
           {isLoadingBase ? (
-            <section className="empty-state">Loading data...</section>
+            <section className="empty-state">지표 정보를 불러오는 중...</section>
           ) : !showResults ? (
-            <section className="empty-state">Select conditions and search.</section>
+            <section className="empty-state">옵션을 선택하고 조회를 눌러주세요.</section>
           ) : (
             <div className="left-stack">
-              <div className="breadcrumb">{breadcrumbLabel}</div>
-              {measurementUnit !== "all" && (
-                <EntityList
-                  titleUnit={measurementUnit}
-                  items={entityListData}
-                  selectedId={selectedEntityId ?? undefined}
-                  onSelect={(entity) => setSelectedEntityId(entity.id)}
-                  onDrilldown={
-                    measurementUnit === "stadium"
-                      ? undefined
-                      : () => {
-                          if (measurementUnit === "area_group") {
-                            handleDrilldown("area");
-                          }
-                          if (measurementUnit === "area") {
-                            handleDrilldown("stadium_group");
-                          }
-                          if (measurementUnit === "stadium_group") {
-                            handleDrilldown("stadium");
-                          }
-                        }
-                  }
+              <div className="breadcrumb">
+                {measurementUnit === "all"
+                  ? ALL_LABEL
+                  : `${unitLabel[measurementUnit]} · ${filterValue === ALL_VALUE ? "전체" : filterValue}`}
+              </div>
+
+              {measurementUnit === "all" ? (
+                <MetricTable
+                  title="전체 지표 추이"
+                  weeks={weeks}
+                  metrics={selectedMetrics}
+                  series={seriesByEntity[ALL_LABEL] ?? {}}
+                  primaryMetricId={primaryMetricId}
+                />
+              ) : (
+                <EntityMetricTable
+                  weeks={weeks}
+                  entities={entities}
+                  metrics={selectedMetrics}
+                  primaryMetricId={primaryMetricId}
+                  seriesByEntity={seriesByEntity}
                 />
               )}
 
-              <div className="heatmap-section">
-                <InfoBar info={infoPayload} />
-                {renderHeatmap()}
-                <InsightsPanel
-                  targetLabel={`${unitLabel[measurementUnit]} ${insightsTitle}`}
-                  weeks={displayedWeeks}
-                  metrics={metrics}
-                  series={insightsSeries ?? {}}
-                  measurementUnit={measurementUnit}
-                  onRecommend={handleRecommend}
-                />
-              </div>
+              {isLoadingHeatmap && <div className="empty-state">데이터를 불러오는 중...</div>}
             </div>
           )}
         </div>
       </section>
+
+      {isFetching && (
+        <div className="fetch-overlay">
+          <div className="fetch-overlay-card">
+            <div className="spinner" />
+            <div className="fetch-overlay-text">데이터를 불러오는 중입니다...</div>
+            <button
+              type="button"
+              onClick={() => {
+                if (abortRef.current) abortRef.current.abort();
+                setIsFetching(false);
+              }}
+            >
+              실행취소
+            </button>
+          </div>
+        </div>
+      )}
+
+      <ErrorLogPanel
+        logs={errorLogs}
+        isOpen={isErrorLogOpen}
+        onToggle={() => setIsErrorLogOpen((prev) => !prev)}
+        onClear={() => setErrorLogs([])}
+      />
     </main>
   );
 }

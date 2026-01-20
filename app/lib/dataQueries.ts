@@ -1,4 +1,4 @@
-import "server-only";
+﻿import "server-only";
 import { supabaseServer } from "./supabaseServer";
 
 const METRIC_IDS = [
@@ -46,71 +46,145 @@ const parseWeekStart = (weekLabel: string) => {
   return new Date(Date.UTC(year, month - 1, day));
 };
 
-const dedupeWeeks = (rows: { week: string }[]) => {
-  const seen = new Set<string>();
-  const ordered: string[] = [];
-  rows.forEach((row) => {
-    const week = String(row.week ?? "").trim();
-    if (!week || seen.has(week)) return;
-    seen.add(week);
-    ordered.push(week);
-  });
-  return ordered;
+const parseWeekStartLocal = (weekLabel: string) => {
+  const match = weekLabel.match(/^(\d{2})\.(\d{2})\.(\d{2})/);
+  if (!match) return null;
+  const year = 2000 + Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
 };
 
-const fetchWeeksByDateColumns = async () => {
-  const { data, error } = await applyBaseFilters(
-    schemaClient.from(tableName(BASE_TABLE)).select("week,year,month,day")
-  )
-    .order("year", { ascending: false })
-    .order("month", { ascending: false })
-    .order("day", { ascending: false });
+const toStartDate = (row: { week?: string | null; year?: number | null; month?: number | null; day?: number | null }) => {
+  if (
+    typeof row.year === "number" &&
+    typeof row.month === "number" &&
+    typeof row.day === "number" &&
+    row.year > 0 &&
+    row.month > 0 &&
+    row.day > 0
+  ) {
+    return new Date(Date.UTC(row.year, row.month - 1, row.day));
+  }
+  const weekLabel = typeof row.week === "string" ? row.week.trim() : "";
+  return weekLabel ? parseWeekStart(weekLabel) : null;
+};
 
-  if (error) return { weeks: null as string[] | null, error };
+const formatDate = (date: Date | null) => (date ? date.toISOString().slice(0, 10) : null);
 
-  const rows = (data ?? []) as { week: string; year?: number | null; month?: number | null; day?: number | null }[];
-  const hasDateParts = rows.some((row) => row.year !== null || row.month !== null || row.day !== null);
-  if (!hasDateParts) {
-    return { weeks: null as string[] | null, error: null };
+type WeekEntry = { week: string; startDate: string | null };
+
+const parseStartDateLocal = (value: string | null) => {
+  if (!value) return null;
+  const [year, month, day] = value.split("-").map((part) => Number(part));
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+};
+
+const getCurrentWeekWindow = (limit: number) => {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const day = todayStart.getDay();
+  const diffToMonday = (day + 6) % 7;
+  const currentWeekStart = new Date(todayStart);
+  currentWeekStart.setDate(currentWeekStart.getDate() - diffToMonday);
+  const cutoff = new Date(currentWeekStart);
+  cutoff.setDate(cutoff.getDate() - (limit - 1) * 7);
+  return { cutoff, currentWeekStart };
+};
+
+const buildWeekEntries = async (limit?: number) => {
+  const effectiveLimit = typeof limit === "number" && limit > 0 ? limit : WEEK_LIMIT_DEFAULT;
+  const { cutoff, currentWeekStart } = getCurrentWeekWindow(effectiveLimit);
+  const pageSize = 500;
+  const maxPages = 20;
+
+  const uniqueWeeks: string[] = [];
+  const seen = new Set<string>();
+
+  for (let page = 0; page < maxPages; page += 1) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    const { data, error } = await applyBaseFilters(
+      schemaClient.from(tableName(BASE_TABLE)).select("week")
+    )
+      .order("week", { ascending: false })
+      .range(from, to);
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) break;
+
+    for (const row of data as { week?: string | null }[]) {
+      const week = typeof row.week === "string" ? row.week.trim() : "";
+      if (!week || seen.has(week)) continue;
+      const startDate = parseWeekStartLocal(week);
+      if (!startDate) continue;
+      if (startDate > currentWeekStart) continue;
+      if (startDate < cutoff) continue;
+      seen.add(week);
+      uniqueWeeks.push(week);
+      if (uniqueWeeks.length >= effectiveLimit) break;
+    }
+
+    if (uniqueWeeks.length >= effectiveLimit) break;
   }
 
-  const ordered = dedupeWeeks(rows);
-  return { weeks: ordered, error: null };
-};
+  if (uniqueWeeks.length === 0) return [];
 
-const fetchWeeksByParsedWeek = async () => {
-  const { data, error } = await applyBaseFilters(
-    schemaClient.from(tableName(BASE_TABLE)).select("week")
-  );
-  if (error) throw new Error(error.message);
+  const { data: dateRows, error: dateError } = await applyBaseFilters(
+    schemaClient.from(tableName(BASE_TABLE)).select("week,year,month,day")
+  ).in("week", uniqueWeeks);
+  if (dateError) throw new Error(dateError.message);
 
-  const unique = dedupeWeeks((data ?? []) as { week: string }[]);
-  return unique
-    .map((week) => ({ week, date: parseWeekStart(week) }))
-    .sort((a, b) => {
-      if (!a.date && !b.date) return 0;
-      if (!a.date) return 1;
-      if (!b.date) return -1;
-      return b.date.getTime() - a.date.getTime();
+  const map = new Map<string, { week: string; startDate: Date | null }>();
+  (dateRows ?? []).forEach((row) => {
+    const typed = row as { week?: string | null; year?: number | null; month?: number | null; day?: number | null };
+    const week = typeof typed.week === "string" ? typed.week.trim() : "";
+    if (!week) return;
+    const startDate = toStartDate(typed);
+    const existing = map.get(week);
+    if (!existing) {
+      map.set(week, { week, startDate });
+      return;
+    }
+    if (startDate && (!existing.startDate || startDate > existing.startDate)) {
+      existing.startDate = startDate;
+    }
+  });
+
+  uniqueWeeks.forEach((week) => {
+    if (!map.has(week)) {
+      map.set(week, { week, startDate: parseWeekStart(week) });
+    } else if (!map.get(week)?.startDate) {
+      map.get(week)!.startDate = parseWeekStart(week);
+    }
+  });
+
+  return uniqueWeeks
+    .map((week) => {
+      const entry = map.get(week);
+      return { week, startDate: formatDate(entry?.startDate ?? null) };
     })
-    .map((item) => item.week);
+    .filter(Boolean);
 };
+
+export async function getWeeksData(options?: { limit?: number; order?: "asc" | "desc" }) {
+  const limit = options?.limit ?? WEEK_LIMIT_DEFAULT;
+  const order = options?.order ?? "asc";
+  const entries = await buildWeekEntries(limit);
+  const limited =
+    typeof limit === "number" && Number.isFinite(limit) && limit > 0 ? entries.slice(0, limit) : entries;
+  return order === "desc" ? limited : limited.slice().reverse();
+}
 
 export async function getWeeks(limit = WEEK_LIMIT_DEFAULT) {
-  const { weeks: orderedWeeks, error } = await fetchWeeksByDateColumns();
-
-  let weeks = orderedWeeks;
-  if (!weeks || error) {
-    weeks = await fetchWeeksByParsedWeek();
-  }
-
-  const limited = weeks.slice(0, limit);
-  return limited.reverse();
+  const entries = await getWeeksData({ limit, order: "asc" });
+  return entries.map((entry) => entry.week);
 }
 
 export async function getLatestWeek() {
-  const weeks = await getWeeks(1);
-  return weeks[0] ?? null;
+  const entries = await getWeeksData({ limit: 1, order: "desc" });
+  return entries[0]?.week ?? null;
 }
 
 export async function getMetricDictionary() {
@@ -152,10 +226,14 @@ type HeatmapParams = {
   measureUnit: QueryMeasureUnit;
   filterValue: string | null;
   weeks: string[];
+  metrics?: string[];
 };
 
-export async function getHeatmap({ measureUnit, filterValue, weeks }: HeatmapParams) {
+export async function getHeatmap({ measureUnit, filterValue, weeks, metrics }: HeatmapParams) {
   const weekIndex = new Map(weeks.map((week, index) => [week, index]));
+  const metricIds = (metrics && metrics.length > 0 ? metrics : [...METRIC_IDS]).filter(
+    (metric) => METRIC_IDS.includes(metric as (typeof METRIC_IDS)[number])
+  );
   const columns = [
     "week",
     "dimension_type",
@@ -163,7 +241,7 @@ export async function getHeatmap({ measureUnit, filterValue, weeks }: HeatmapPar
     "area",
     "stadium_group",
     "stadium",
-    ...METRIC_IDS
+    ...metricIds
   ];
 
   let query = applyBaseFilters(
@@ -175,7 +253,12 @@ export async function getHeatmap({ measureUnit, filterValue, weeks }: HeatmapPar
   }
 
   if (measureUnit === "all") {
-    query = query.is("dimension_type", null);
+    query = query
+      .is("dimension_type", null)
+      .is("area_group", null)
+      .is("area", null)
+      .is("stadium_group", null)
+      .is("stadium", null);
   } else if (filterValue) {
     const columnByUnit: Record<Exclude<QueryMeasureUnit, "all">, string> = {
       area_group: "area_group",
@@ -184,6 +267,14 @@ export async function getHeatmap({ measureUnit, filterValue, weeks }: HeatmapPar
       stadium: "stadium"
     };
     query = query.eq(columnByUnit[measureUnit], filterValue);
+  } else {
+    const columnByUnit: Record<Exclude<QueryMeasureUnit, "all">, string> = {
+      area_group: "area_group",
+      area: "area",
+      stadium_group: "stadium_group",
+      stadium: "stadium"
+    };
+    query = query.not(columnByUnit[measureUnit], "is", null);
   }
 
   const { data, error } = await query;
@@ -215,7 +306,7 @@ export async function getHeatmap({ measureUnit, filterValue, weeks }: HeatmapPar
         ? ALL_LABEL
         : String(typed[measureUnit] ?? typed[measureUnit as keyof typeof typed] ?? "").trim();
     const metrics: Record<string, number> = {};
-    METRIC_IDS.forEach((metric) => {
+    metricIds.forEach((metric) => {
       const value = typed[metric];
       metrics[metric] = typeof value === "number" ? value : Number(value ?? 0);
     });
@@ -237,3 +328,4 @@ export async function getHeatmap({ measureUnit, filterValue, weeks }: HeatmapPar
 
 export const METRIC_ID_LIST = METRIC_IDS;
 export const ALL_ENTITY_LABEL = ALL_LABEL;
+

@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+﻿import type { CSSProperties } from "react";
 import { Metric } from "../types";
 import { getAnomalyIndices, getZScores } from "../lib/anomaly";
 import { formatValue } from "../lib/format";
@@ -40,8 +40,7 @@ export default function HeatmapMatrix({ title, weeks, metrics, series, onInfoCha
           const anomalies = getAnomalyIndices(values);
           const zscores = getZScores(values);
           const lastIndex = values.length - 1;
-          const delta =
-            values.length >= 2 ? values[lastIndex] - values[lastIndex - 1] : undefined;
+          const delta = values.length >= 2 ? values[lastIndex] - values[lastIndex - 1] : undefined;
 
           return (
             <div key={metric.id} className="heatmap-row">
@@ -58,18 +57,17 @@ export default function HeatmapMatrix({ title, weeks, metrics, series, onInfoCha
                   })
                 }
               >
-                {/* metric_store_native 기반 설명을 tooltip으로 노출 */}
                 <MetricTooltip
                   label={metric.name}
                   title={metric.name}
                   description={metric.description}
-                  detail="기준시점: 주간"
+                  detail="데이터 원천: Supabase"
                 />
               </div>
               {values.map((value, index) => {
                 const isAnomaly = anomalies.includes(index);
                 const score = zscores[index];
-                const detail = `주차: ${weeks[index]} · Δ: ${
+                const detail = `주차: ${weeks[index]} · 증감: ${
                   index > 0 ? formatValue(value - values[index - 1], metric) : "-"
                 }`;
                 return (

@@ -1,4 +1,4 @@
-import { Metric } from "../types";
+﻿import { Metric } from "../types";
 import { formatValue } from "../lib/format";
 
 export type InfoPayload = {
@@ -30,7 +30,7 @@ export default function InfoBar({ info }: InfoBarProps) {
       <span className="info-desc">{metric.description}</span>
       <span className="info-item">주차: {week ?? "-"}</span>
       <span className="info-item">값: {valueLabel}</span>
-      <span className="info-item">Δ: {deltaLabel}</span>
+      <span className="info-item">증감: {deltaLabel}</span>
       <span className={`info-item ${isAnomaly ? "is-anomaly" : ""}`}>
         이상치: {isAnomaly ? `예 (z=${(zscore ?? 0).toFixed(2)})` : "아니오"}
       </span>

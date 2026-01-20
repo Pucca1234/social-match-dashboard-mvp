@@ -2,13 +2,13 @@ import { Entity, MeasurementUnit } from "../types";
 
 const unitLabels: Record<MeasurementUnit, string> = {
   all: "전체",
-  area_group: "Area group",
-  area: "Area",
-  stadium_group: "Stadium group",
-  stadium: "Stadium",
-  region_group: "Region group",
-  region: "Region",
-  court: "Court"
+  area_group: "지역 그룹",
+  area: "지역",
+  stadium_group: "구장 그룹",
+  stadium: "구장",
+  region_group: "권역 그룹",
+  region: "권역",
+  court: "면"
 };
 
 type EntityListProps = {
@@ -30,14 +30,14 @@ export default function EntityList({ titleUnit, items, selectedId, onSelect, onD
     <div className="panel entity-list">
       <div className="panel-title">
         {unitLabels[titleUnit]} 리스트
-        <span className="panel-subtitle">{items.length}개 대상</span>
+        <span className="panel-subtitle">{items.length}개</span>
       </div>
       <div className="list-header">
         <span>대상</span>
         <span>점수</span>
         <span>주요 지표</span>
         <span>이상 주차</span>
-        <span>레이더</span>
+        <span>추이</span>
       </div>
       <div className="list-body">
         {items.map((item) => (
@@ -58,7 +58,7 @@ export default function EntityList({ titleUnit, items, selectedId, onSelect, onD
                     onDrilldown(item.entity);
                   }}
                 >
-                  ▶︎
+                  상세
                 </button>
               )}
             </span>

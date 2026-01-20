@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&display=swap");
+﻿@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&display=swap");
 
 :root {
   --bg: #f3efe9;
@@ -120,6 +120,42 @@ main {
 .control-field button:hover {
   transform: translateY(-1px);
   box-shadow: 0 10px 20px rgba(31, 111, 95, 0.2);
+}
+
+.control-field button:disabled {
+  background: #cfd6d2;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.control-metrics {
+  grid-column: 1 / -1;
+}
+
+.metric-select-list {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  overflow: visible;
+}
+
+.metric-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.metric-option input {
+  accent-color: var(--accent);
+}
+
+.metric-option-label {
+  flex: 1;
 }
 
 .dashboard-layout {
@@ -344,6 +380,137 @@ main {
   padding: 2px 6px;
 }
 
+.metric-table {
+  padding-bottom: 12px;
+}
+
+.metric-grid {
+  display: grid;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+
+.metric-row {
+  display: grid;
+  grid-template-columns: 200px 120px repeat(var(--week-count), minmax(110px, 1fr));
+  gap: 6px;
+  align-items: stretch;
+}
+
+.metric-row.is-primary .metric-name {
+  color: var(--accent-2);
+  font-weight: 700;
+}
+
+.metric-header .metric-cell {
+  background: #f5ece2;
+  font-weight: 600;
+}
+
+.metric-cell {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-height: 52px;
+}
+
+.metric-week {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.metric-spark {
+  align-items: center;
+  justify-content: center;
+}
+
+.metric-value-main {
+  font-weight: 600;
+}
+
+.metric-delta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.metric-delta.is-negative {
+  color: #c5482e;
+}
+
+.sparkline {
+  width: 100%;
+  height: 36px;
+}
+
+.sparkline-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.sparkline-tooltip {
+  position: absolute;
+  transform: translate(-50%, -120%);
+  background: #1f1a16;
+  color: #fff;
+  font-size: 11px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 5;
+}
+
+.sparkline-tooltip-label {
+  color: #ffd9c6;
+  font-size: 10px;
+}
+
+.sparkline-tooltip-value {
+  font-weight: 600;
+}
+
+.metric-row-group {
+  display: grid;
+  gap: 10px;
+}
+
+.entity-row {
+  cursor: pointer;
+  transition: border 0.2s ease, background 0.2s ease;
+}
+
+.entity-row:hover {
+  background: #f9efe5;
+}
+
+.entity-row.is-expanded {
+  border-color: var(--accent);
+  background: #f3ede6;
+}
+
+.entity-label {
+  font-weight: 700;
+}
+
+.entity-toggle {
+  font-size: 11px;
+  color: var(--accent-2);
+  font-weight: 600;
+}
+
+.entity-detail .metric-table {
+  padding: 12px;
+  background: #fff7ee;
+}
+
 .info-bar {
   background: #fff;
   border-radius: 14px;
@@ -386,11 +553,9 @@ main {
   cursor: help;
 }
 
-.tooltip-content {
-  position: absolute;
-  z-index: 40;
-  left: 0;
-  top: 120%;
+.tooltip-portal {
+  position: fixed;
+  z-index: 1000;
   min-width: 200px;
   max-width: 260px;
   background: #1f1a16;
@@ -398,10 +563,6 @@ main {
   font-size: 12px;
   padding: 10px 12px;
   border-radius: 10px;
-  opacity: 0;
-  transform: translateY(6px);
-  pointer-events: none;
-  transition: opacity 0.2s ease, transform 0.2s ease;
   display: grid;
   gap: 6px;
   box-shadow: 0 10px 18px rgba(0, 0, 0, 0.18);
@@ -411,10 +572,6 @@ main {
   color: #ffd9c6;
 }
 
-.tooltip:hover .tooltip-content {
-  opacity: 1;
-  transform: translateY(0);
-}
 
 .summary-block {
   display: grid;
@@ -465,6 +622,82 @@ main {
 .checkbox-grid {
   display: grid;
   gap: 10px;
+}
+
+.error-log {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 200;
+}
+
+.error-log-toggle {
+  border: none;
+  background: #1f1a16;
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+
+.error-log-panel {
+  margin-top: 10px;
+  width: 320px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: #1f1a16;
+  color: #fff;
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: var(--shadow);
+}
+
+.error-log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.error-log-header button {
+  border: none;
+  background: transparent;
+  color: #ffd9c6;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.error-log-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.error-log-message {
+  font-weight: 600;
+}
+
+.error-log-meta {
+  color: #ffd9c6;
+  font-size: 11px;
+}
+
+.error-log-detail {
+  white-space: pre-wrap;
+  font-size: 11px;
+  margin: 6px 0 0;
+  color: #f4e7dd;
+}
+
+.error-log-empty {
+  font-size: 12px;
+  color: #ffd9c6;
 }
 
 .insights-panel {
@@ -577,6 +810,10 @@ main {
     grid-template-columns: 140px repeat(var(--week-count), minmax(80px, 1fr));
   }
 
+  .metric-row {
+    grid-template-columns: 140px 100px repeat(var(--week-count), minmax(80px, 1fr));
+  }
+
   .list-header,
   .list-row {
     grid-template-columns: 1fr 0.5fr;
@@ -590,3 +827,56 @@ main {
     display: none;
   }
 }
+
+.fetch-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(18, 14, 12, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 400;
+}
+
+.fetch-overlay-card {
+  background: #fffaf3;
+  border-radius: 16px;
+  padding: 24px 28px;
+  display: grid;
+  gap: 12px;
+  place-items: center;
+  box-shadow: var(--shadow);
+}
+
+.fetch-overlay-card button {
+  border: none;
+  background: #1f1a16;
+  color: #fff;
+  padding: 8px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.fetch-overlay-text {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid #e5d8cd;
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+
+

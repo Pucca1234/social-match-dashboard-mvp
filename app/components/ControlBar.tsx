@@ -1,4 +1,5 @@
-import { FilterOption, MeasurementUnit, PeriodUnit } from "../types";
+﻿import { FilterOption, MeasurementUnit, Metric, PeriodUnit } from "../types";
+import MetricTooltip from "./MetricTooltip";
 
 type ControlBarProps = {
   periodUnit: PeriodUnit;
@@ -6,11 +7,17 @@ type ControlBarProps = {
   periodRangeOptions: { label: string; value: string }[];
   onPeriodRangeChange: (value: string) => void;
   measurementUnit: MeasurementUnit;
+  onMeasurementUnitChange: (value: MeasurementUnit) => void;
   filterOptions: FilterOption[];
   filterValue: string;
-  onMeasurementUnitChange: (value: MeasurementUnit) => void;
   onFilterChange: (value: string) => void;
+  metrics: Metric[];
+  selectedMetricIds: string[];
+  primaryMetricId: string;
+  onSelectedMetricIdsChange: (next: string[]) => void;
+  onPrimaryMetricChange: (value: string) => void;
   onSearch: () => void;
+  isSearchDisabled?: boolean;
 };
 
 export default function ControlBar({
@@ -19,12 +26,28 @@ export default function ControlBar({
   periodRangeOptions,
   onPeriodRangeChange,
   measurementUnit,
+  onMeasurementUnitChange,
   filterOptions,
   filterValue,
-  onMeasurementUnitChange,
   onFilterChange,
-  onSearch
+  metrics,
+  selectedMetricIds,
+  primaryMetricId,
+  onSelectedMetricIdsChange,
+  onPrimaryMetricChange,
+  onSearch,
+  isSearchDisabled
 }: ControlBarProps) {
+  const toggleMetric = (metricId: string) => {
+    if (selectedMetricIds.includes(metricId)) {
+      onSelectedMetricIdsChange(selectedMetricIds.filter((id) => id !== metricId));
+    } else {
+      onSelectedMetricIdsChange([...selectedMetricIds, metricId]);
+    }
+  };
+
+  const primaryOptions = metrics.filter((metric) => selectedMetricIds.includes(metric.id));
+
   return (
     <div className="control-bar">
       <div className="control-grid">
@@ -48,10 +71,10 @@ export default function ControlBar({
           <label>측정단위</label>
           <select value={measurementUnit} onChange={(event) => onMeasurementUnitChange(event.target.value as MeasurementUnit)}>
             <option value="all">전체</option>
-            <option value="area_group">Area group</option>
-            <option value="area">Area</option>
-            <option value="stadium_group">Stadium group</option>
-            <option value="stadium">Stadium</option>
+            <option value="area_group">지역 그룹</option>
+            <option value="area">지역</option>
+            <option value="stadium_group">구장 그룹</option>
+            <option value="stadium">구장</option>
           </select>
         </div>
         <div className="control-field">
@@ -65,7 +88,37 @@ export default function ControlBar({
           </select>
         </div>
         <div className="control-field">
-          <button type="button" onClick={onSearch}>
+          <label>핵심 지표</label>
+          <select
+            value={primaryMetricId}
+            onChange={(event) => onPrimaryMetricChange(event.target.value)}
+            disabled={primaryOptions.length === 0}
+          >
+            {primaryOptions.map((metric) => (
+              <option key={metric.id} value={metric.id}>
+                {metric.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="control-field control-metrics">
+          <label>지표 선택</label>
+          <div className="metric-select-list">
+            {metrics.map((metric) => (
+              <label key={metric.id} className="metric-option">
+                <input
+                  type="checkbox"
+                  checked={selectedMetricIds.includes(metric.id)}
+                  onChange={() => toggleMetric(metric.id)}
+                />
+                <span className="metric-option-label">{metric.name}</span>
+                <MetricTooltip label="ⓘ" title={metric.name} description={metric.description} />
+              </label>
+            ))}
+          </div>
+        </div>
+        <div className="control-field">
+          <button type="button" onClick={onSearch} disabled={isSearchDisabled}>
             조회하기
           </button>
         </div>

@@ -1,8 +1,8 @@
-import "./globals.css";
+﻿import "./globals.css";
 
 export const metadata = {
-  title: "PLAB Dashboard Prototype",
-  description: "Selection → query → result → drilldown prototype"
+  title: "Kevin",
+  description: "Social match analytics dashboard MVP"
 };
 
 export default function RootLayout({

@@ -28,13 +28,13 @@ const unitNext: Record<MeasurementUnit, MeasurementUnit | null> = {
 
 const unitLabel: Record<MeasurementUnit, string> = {
   all: "전체",
-  area_group: "Area group",
-  area: "Area",
-  stadium_group: "Stadium group",
-  stadium: "Stadium",
-  region_group: "Region group",
-  region: "Region",
-  court: "Court"
+  area_group: "지역 그룹",
+  area: "지역",
+  stadium_group: "구장 그룹",
+  stadium: "구장",
+  region_group: "권역 그룹",
+  region: "권역",
+  court: "면"
 };
 
 const getLatestDelta = (values: number[]) => {
@@ -77,7 +77,7 @@ export default function InsightsPanel({
 
   const anomalySummary =
     anomalyDetails.length === 0
-      ? "이번 범위에서는 뚜렷한 이상치가 없습니다."
+      ? "이번 범위에서 뚜렷한 이상치는 없습니다."
       : anomalyDetails
           .map((entry) => {
             const direction = entry.score >= 0 ? "증가" : "감소";
@@ -111,19 +111,19 @@ export default function InsightsPanel({
   }
 
   const summaryLines = [
-    `${primaryMetric?.name ?? "핵심 지표"}는 최근 흐름에서 ${primaryDelta >= 0 ? "상승" : "하락"}세입니다.`,
-    `${secondaryMetric?.name ?? "보조 지표"}는 ${secondaryDelta >= 0 ? "안정적" : "약세"} 흐름을 보입니다.`,
-    "현재 범위는 탐색용 요약이며 상세 원인은 하위 드릴다운에서 확인 가능합니다."
+    `${primaryMetric?.name ?? "핵심 지표"}가 최근 흐름에서 ${primaryDelta >= 0 ? "상승" : "하락"}했습니다.`,
+    `${secondaryMetric?.name ?? "보조 지표"}는 ${secondaryDelta >= 0 ? "상승" : "하락"} 흐름을 보입니다.`,
+    "현재 범위에서 이상치 후보는 색으로 표시되며, 자세한 변화는 아래 항목에서 확인할 수 있습니다."
   ];
 
   const hypotheses = [
-    "특정 지역/구장 단위 쏠림이 지표 변화를 만들었을 가능성이 있어요.",
-    "이상치가 있는 주차는 프로모션/외부 이슈 영향일 수 있습니다."
+    "특정 지역/구장 단위의 분포 변화가 지표 변동을 만들었을 수 있습니다.",
+    "이상치가 있는 주차는 프로모션/외부 이슈 영향이 있었는지 확인이 필요합니다."
   ];
 
   return (
     <div className="panel insights-panel">
-      {/* 우측바 제거에 따라 하단 종합 인사이트 카드로 축소 */}
+      {/* 과도한 텍스트를 줄인 간단 요약 인사이트 카드 */}
       <div className="panel-title">Insights · {targetLabel}</div>
       <div className="insight-card">
         <div className="insight-section">
@@ -145,7 +145,7 @@ export default function InsightsPanel({
           </ul>
         </div>
         <div className="insight-section">
-          <div className="insight-heading">다음 추천 드릴다운 옵션</div>
+          <div className="insight-heading">다음 추천 액션</div>
           <div className="recommend-list">
             {recommendations.length === 0 ? (
               <span className="muted">추천 항목이 없습니다.</span>
