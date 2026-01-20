@@ -73,7 +73,7 @@ export async function POST(request: Request) {
       measureUnit: measureUnit as (typeof allowedUnits)[number],
       filterValue: filterValue && filterValue.trim() !== "" ? filterValue : null,
       weeks,
-      metrics: metricIds
+      metrics: metricIds ? [...metricIds] : undefined
     });
     return NextResponse.json({ rows });
   } catch (error) {

@@ -109,6 +109,9 @@ const injectAnomalies = (values: number[], seed: number, config: MetricConfig) =
 
 const scaleByUnit: Record<MeasurementUnit, number> = {
   all: 1,
+  area_group: 0.7,
+  area: 0.5,
+  stadium_group: 0.32,
   region_group: 0.65,
   region: 0.38,
   stadium: 0.22,
@@ -136,6 +139,9 @@ const allEntity: Entity = {
 const entitySeriesMap: Record<string, EntitySeries> = {};
 const entitiesByUnit: Record<MeasurementUnit, Entity[]> = {
   all: [allEntity],
+  area_group: [],
+  area: [],
+  stadium_group: [],
   region_group: [],
   region: [],
   stadium: [],

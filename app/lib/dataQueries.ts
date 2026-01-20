@@ -19,11 +19,11 @@ type QueryMeasureUnit = "all" | "area_group" | "area" | "stadium_group" | "stadi
 
 const hasSchemaFn = typeof (supabaseServer as { schema?: (name: string) => unknown }).schema === "function";
 const schemaClient = hasSchemaFn
-  ? (supabaseServer as { schema: (name: string) => typeof supabaseServer }).schema(SCHEMA_NAME)
+  ? (supabaseServer as unknown as { schema: (name: string) => typeof supabaseServer }).schema(SCHEMA_NAME)
   : supabaseServer;
 const tableName = (name: string) => (hasSchemaFn ? name : `${SCHEMA_NAME}.${name}`);
 
-const applyBaseFilters = <T extends ReturnType<typeof schemaClient.from>>(query: T) =>
+const applyBaseFilters = (query: any) =>
   query
     .eq("period_type", "week")
     .is("day", null)
@@ -137,7 +137,7 @@ const buildWeekEntries = async (limit?: number) => {
   if (dateError) throw new Error(dateError.message);
 
   const map = new Map<string, { week: string; startDate: Date | null }>();
-  (dateRows ?? []).forEach((row) => {
+  (dateRows ?? []).forEach((row: any) => {
     const typed = row as { week?: string | null; year?: number | null; month?: number | null; day?: number | null };
     const week = typeof typed.week === "string" ? typed.week.trim() : "";
     if (!week) return;
@@ -216,8 +216,8 @@ export async function getFilterOptions(measureUnit: QueryMeasureUnit) {
   if (error) throw new Error(error.message);
 
   const values = (data ?? [])
-    .map((row) => (row as Record<string, string | null>)[column])
-    .filter((value) => !isBlank(value)) as string[];
+    .map((row: any) => (row as Record<string, string | null>)[column])
+    .filter((value: unknown) => !isBlank(value)) as string[];
 
   return Array.from(new Set(values)).sort();
 }
@@ -280,7 +280,7 @@ export async function getHeatmap({ measureUnit, filterValue, weeks, metrics }: H
   const { data, error } = await query;
   if (error) throw new Error(error.message);
 
-  const rows = (data ?? []).filter((row) => {
+  const rows = (data ?? []).filter((row: any) => {
     const typed = row as Record<string, string | null>;
     if (measureUnit === "all") {
       return (
@@ -299,7 +299,7 @@ export async function getHeatmap({ measureUnit, filterValue, weeks, metrics }: H
     return !isBlank(typed[columnByUnit[measureUnit]]);
   });
 
-  const mapped = rows.map((row) => {
+  const mapped = rows.map((row: any) => {
     const typed = row as Record<string, string | number | null>;
     const entity =
       measureUnit === "all"
@@ -318,7 +318,7 @@ export async function getHeatmap({ measureUnit, filterValue, weeks, metrics }: H
     };
   });
 
-  return mapped.sort((a, b) => {
+  return mapped.sort((a: any, b: any) => {
     if (a.entity !== b.entity) {
       return a.entity.localeCompare(b.entity);
     }
