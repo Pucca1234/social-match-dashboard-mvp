@@ -30,18 +30,55 @@ const metricFormats: Record<string, Metric["format"]> = {
   match_loss_rate: "percent"
 };
 
+const fallbackMetrics: Metric[] = [
+  {
+    id: "total_match_cnt",
+    name: "전체 매치 수",
+    description: "공개 혹은 취소 상태의 매치 수. 진행률 계산식의 분모에 해당.",
+    format: "number"
+  },
+  {
+    id: "setting_match_cnt",
+    name: "세팅 매치 수",
+    description: "정기일정 혹은 개별일정 형태로 생성된 매치 수.",
+    format: "number"
+  },
+  {
+    id: "progress_match_cnt",
+    name: "진행 매치 수",
+    description: "매치 시작 시간이 지난 공개 상태의 매치 수.",
+    format: "number"
+  },
+  {
+    id: "progress_match_rate",
+    name: "진행률",
+    description: "전체 매치 수 대비 진행 매치 수의 비율.",
+    format: "percent"
+  },
+  {
+    id: "match_open_rate",
+    name: "매치 공개율",
+    description: "세팅 매치 중 매니저가 배정되거나 플래버 매치로 공개된 매치 비율.",
+    format: "percent"
+  },
+  {
+    id: "match_loss_rate",
+    name: "매치 로스율",
+    description: "세팅 매치 중 매치 공개 후 숨기기 처리된 매치 비율.",
+    format: "percent"
+  }
+];
+
 const periodRangeOptions = [
   { label: "최근 8주", value: "recent_8" },
   { label: "최근 12주", value: "recent_12" },
-  { label: "최근 24주", value: "recent_24" },
-  { label: "전체", value: "all" }
+  { label: "최근 24주", value: "recent_24" }
 ];
 
 const periodRangeSizeMap: Record<string, number> = {
   recent_8: 8,
   recent_12: 12,
-  recent_24: 24,
-  all: 104
+  recent_24: 24
 };
 
 type MetricRow = {
@@ -56,6 +93,18 @@ type HeatmapRow = {
   metrics: Record<string, number>;
 };
 
+type SummaryPayload = {
+  title: string;
+  bullets: string[];
+  caution?: string;
+};
+
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+};
+
 const fetchJson = async <T,>(input: RequestInfo, init?: RequestInit): Promise<T> => {
   const response = await fetch(input, init);
   if (!response.ok) {
@@ -65,7 +114,51 @@ const fetchJson = async <T,>(input: RequestInfo, init?: RequestInit): Promise<T>
   return (await response.json()) as T;
 };
 
+const fetchJsonWithTimeout = async <T,>(
+  input: RequestInfo,
+  timeoutMs: number,
+  init?: RequestInit
+): Promise<T> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetchJson<T>(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const getMetricFormat = (metricId: string) => metricFormats[metricId] ?? "number";
+
+const buildContext = (
+  weeks: string[],
+  metrics: Metric[],
+  primaryMetricId: string | null,
+  seriesByEntity: Record<string, Record<string, number[]>>,
+  measurementUnit: MeasurementUnit,
+  filterValue: string
+) => {
+  const unitName =
+    measurementUnit === "all" ? ALL_LABEL : unitLabel[measurementUnit] ?? measurementUnit;
+  const entityKey = measurementUnit === "all" ? ALL_LABEL : filterValue;
+  const series = seriesByEntity[entityKey] ?? seriesByEntity[ALL_LABEL] ?? {};
+  const latestIndex = weeks.length - 1;
+
+  const metricSummaries = metrics.map((metric) => {
+    const values = series[metric.id] ?? [];
+    const latest = values[latestIndex] ?? null;
+    const delta = latestIndex > 0 ? (values[latestIndex] ?? 0) - (values[latestIndex - 1] ?? 0) : null;
+    return { metricId: metric.id, name: metric.name, latest, delta, format: metric.format };
+  });
+
+  return {
+    unit: unitName,
+    filter: filterValue,
+    weeks,
+    primaryMetricId: primaryMetricId ?? "",
+    metricSummaries
+  };
+};
 
 export default function Home() {
   const [periodUnit] = useState<PeriodUnit>("week");
@@ -75,11 +168,11 @@ export default function Home() {
 
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [selectedMetricIds, setSelectedMetricIds] = useState<string[]>([]);
-  const [primaryMetricId, setPrimaryMetricId] = useState<string>("");
 
   const [weeks, setWeeks] = useState<string[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [seriesByEntity, setSeriesByEntity] = useState<Record<string, Record<string, number[]>>>({});
+  const [availableMetricIds, setAvailableMetricIds] = useState<string[]>([]);
 
   const [filterOptions, setFilterOptions] = useState<FilterOption[]>([{ label: ALL_LABEL, value: ALL_VALUE }]);
 
@@ -89,10 +182,18 @@ export default function Home() {
   const [isLoadingHeatmap, setIsLoadingHeatmap] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const [summary, setSummary] = useState<SummaryPayload | null>(null);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
+
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [isChatLoading, setIsChatLoading] = useState(false);
+
   const [errorLogs, setErrorLogs] = useState<ErrorLogItem[]>([]);
   const [isErrorLogOpen, setIsErrorLogOpen] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const aiRef = useRef<HTMLDivElement | null>(null);
 
   const pushError = (message: string, detail?: string) => {
     setErrorLogs((prev) => {
@@ -136,7 +237,7 @@ export default function Home() {
       setIsLoadingBase(true);
       setErrorMessage(null);
       try {
-        const response = await fetchJson<{ metrics: MetricRow[] }>("/api/metrics");
+        const response = await fetchJsonWithTimeout<{ metrics: MetricRow[] }>("/api/metrics", 6000);
         if (canceled) return;
         const mappedMetrics = (response.metrics ?? []).map((row) => ({
           id: row.metric,
@@ -147,12 +248,16 @@ export default function Home() {
         setMetrics(mappedMetrics);
         const defaultIds = mappedMetrics.map((metric) => metric.id);
         setSelectedMetricIds(defaultIds);
-        setPrimaryMetricId(mappedMetrics[0]?.id ?? "");
       } catch (error) {
         if (!canceled) {
           const message = (error as Error).message;
           setErrorMessage(message);
           pushError("지표 정보를 불러오지 못했습니다.", message);
+          if (metrics.length === 0) {
+            setMetrics(fallbackMetrics);
+            const defaultIds = fallbackMetrics.map((metric) => metric.id);
+            setSelectedMetricIds(defaultIds);
+          }
         }
       } finally {
         if (!canceled) setIsLoadingBase(false);
@@ -170,12 +275,8 @@ export default function Home() {
     if (!metrics.length) return;
     if (!selectedMetricIds.length) {
       setSelectedMetricIds(metrics.map((metric) => metric.id));
-      return;
     }
-    if (primaryMetricId && selectedMetricIds.includes(primaryMetricId)) return;
-    const fallback = selectedMetricIds[0] ?? metrics[0]?.id ?? "";
-    if (fallback) setPrimaryMetricId(fallback);
-  }, [metrics, selectedMetricIds, primaryMetricId]);
+  }, [metrics, selectedMetricIds]);
 
   useEffect(() => {
     let canceled = false;
@@ -223,7 +324,17 @@ export default function Home() {
     return selectedMetricIds.map((id) => map.get(id)).filter(Boolean) as Metric[];
   }, [metrics, selectedMetricIds]);
 
-  const buildSeriesMap = (rows: HeatmapRow[], metricIds: string[], weekLabels: string[]) => {
+  const missingMetricIds = useMemo(() => {
+    if (!availableMetricIds.length) return [] as string[];
+    return selectedMetricIds.filter((id) => !availableMetricIds.includes(id));
+  }, [availableMetricIds, selectedMetricIds]);
+
+  const buildSeriesMap = (
+    rows: HeatmapRow[],
+    metricIds: string[],
+    weekLabels: string[],
+    unit: MeasurementUnit
+  ) => {
     const weekIndex = new Map(weekLabels.map((week, index) => [week, index]));
     const nextEntities: Entity[] = [];
     const nextSeries: Record<string, Record<string, number[]>> = {};
@@ -237,7 +348,7 @@ export default function Home() {
         metricIds.forEach((metric) => {
           nextSeries[entityKey][metric] = Array(weekLabels.length).fill(0);
         });
-        nextEntities.push({ id: entityKey, name: entityKey, unit: measurementUnit });
+        nextEntities.push({ id: entityKey, name: entityKey, unit });
       }
 
       const series = nextSeries[entityKey];
@@ -247,19 +358,13 @@ export default function Home() {
       });
     });
 
-    setEntities(nextEntities);
-    setSeriesByEntity(nextSeries);
+    return { entities: nextEntities, seriesByEntity: nextSeries };
   };
 
   const handleSearch = async () => {
     if (!selectedMetricIds.length) {
       setErrorMessage("지표를 최소 1개 선택해주세요.");
       pushError("지표를 최소 1개 선택해주세요.");
-      return;
-    }
-    if (!primaryMetricId) {
-      setErrorMessage("핵심 지표를 선택해주세요.");
-      pushError("핵심 지표를 선택해주세요.");
       return;
     }
 
@@ -273,12 +378,13 @@ export default function Home() {
     setIsLoadingHeatmap(true);
     setIsFetching(true);
     setErrorMessage(null);
+    setSummary(null);
 
     try {
       const weeksResponse = await fetchJson<{ weeks: string[] }>(`/api/weeks?n=${size}`, {
         signal: controller.signal
       });
-      const nextWeeks = (weeksResponse.weeks ?? []).slice().reverse();
+      const nextWeeks = weeksResponse.weeks ?? [];
       if (!nextWeeks.length) {
         setErrorMessage("조건에 맞는 주차 데이터가 없습니다.");
         pushError("조건에 맞는 주차 데이터가 없습니다.");
@@ -287,7 +393,10 @@ export default function Home() {
         return;
       }
 
+      const metricIdsForQuery = metrics.map((metric) => metric.id);
+
       setWeeks(nextWeeks);
+      setAvailableMetricIds(metricIdsForQuery);
 
       const response = await fetchJson<{ rows: HeatmapRow[] }>("/api/heatmap", {
         method: "POST",
@@ -299,13 +408,38 @@ export default function Home() {
           measureUnit: measurementUnit,
           filterValue: filterValue === ALL_VALUE ? null : filterValue,
           weeks: nextWeeks,
-          metrics: selectedMetricIds,
-          primaryMetricId
+          metrics: metricIdsForQuery
         })
       });
 
-      buildSeriesMap(response.rows ?? [], selectedMetricIds, nextWeeks);
+      const { entities: nextEntities, seriesByEntity: nextSeries } = buildSeriesMap(
+        response.rows ?? [],
+        metricIdsForQuery,
+        nextWeeks,
+        measurementUnit
+      );
+
+      setEntities(nextEntities);
+      setSeriesByEntity(nextSeries);
       setShowResults(true);
+
+      const context = buildContext(
+        nextWeeks,
+        selectedMetrics,
+        selectedMetrics[0]?.id ?? null,
+        nextSeries,
+        measurementUnit,
+        filterValue === ALL_VALUE ? ALL_LABEL : filterValue
+      );
+
+      setIsSummaryLoading(true);
+      const summaryResponse = await fetchJson<{ summary: SummaryPayload }>("/api/ai/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({ context })
+      });
+      setSummary(summaryResponse.summary);
     } catch (error) {
       if ((error as Error).name === "AbortError") {
         pushError("Request canceled");
@@ -316,6 +450,7 @@ export default function Home() {
       }
     } finally {
       setIsLoadingHeatmap(false);
+      setIsSummaryLoading(false);
       setIsFetching(false);
     }
   };
@@ -336,49 +471,91 @@ export default function Home() {
     setShowResults(false);
   };
 
+  const handleChatSend = async () => {
+    const message = chatInput.trim();
+    if (!message || isChatLoading) return;
+    const userMessage: ChatMessage = { id: `${Date.now()}-user`, role: "user", content: message };
+    setChatMessages((prev) => [...prev, userMessage]);
+    setChatInput("");
+
+    try {
+      setIsChatLoading(true);
+      const context = buildContext(
+        weeks,
+        selectedMetrics,
+        selectedMetrics[0]?.id ?? null,
+        seriesByEntity,
+        measurementUnit,
+        filterValue === ALL_VALUE ? ALL_LABEL : filterValue
+      );
+      const response = await fetchJson<{ reply: string }>("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, context })
+      });
+      const assistantMessage: ChatMessage = {
+        id: `${Date.now()}-assistant`,
+        role: "assistant",
+        content: response.reply
+      };
+      setChatMessages((prev) => [...prev, assistantMessage]);
+    } catch (error) {
+      const messageText = (error as Error).message;
+      pushError("AI 응답 실패", messageText);
+    } finally {
+      setIsChatLoading(false);
+    }
+  };
+
   const isSearchDisabled = isLoadingBase || isLoadingHeatmap;
 
   return (
-    <main>
-      <div className="page-header">
-        <h1 className="page-title">Kevin</h1>
-        <p className="page-subtitle">Social match analytics dashboard MVP.</p>
-      </div>
-
-      <section className="dashboard-layout">
-        <aside className="sidebar left-panel">
-          <div className="panel sidebar-panel">
-            <div className="panel-title">Search Options</div>
-            <ControlBar
-              periodUnit={periodUnit}
-              periodRangeValue={periodRangeValue}
-              periodRangeOptions={periodRangeOptions}
-              onPeriodRangeChange={handlePeriodRangeChange}
-              measurementUnit={measurementUnit}
-              onMeasurementUnitChange={handleMeasurementChange}
-              filterOptions={filterOptions}
-              filterValue={filterValue}
-              onFilterChange={handleFilterChange}
-              metrics={metrics}
-              selectedMetricIds={selectedMetricIds}
-              primaryMetricId={primaryMetricId}
-              onSelectedMetricIdsChange={setSelectedMetricIds}
-              onPrimaryMetricChange={setPrimaryMetricId}
-              onSearch={handleSearch}
-              isSearchDisabled={isSearchDisabled}
-            />
-            {isLoadingFilter && <div className="empty-state">필터 로딩 중...</div>}
+    <main className="app-shell">
+      <header className="app-header">
+        <div className="brand">
+          <img className="brand-icon" src="/kevin-avatar.png" alt="Kevin" />
+          <div>
+            <h1>Kevin</h1>
+            <p>지표 중심 분석을 위한 스마트 대시보드</p>
           </div>
+        </div>
+        <div className="header-meta">
+          <span>데이터 소스: Supabase</span>
+        </div>
+      </header>
+
+      <section className="app-layout">
+        <aside className="sidebar">
+          <ControlBar
+            periodUnit={periodUnit}
+            periodRangeValue={periodRangeValue}
+            periodRangeOptions={periodRangeOptions}
+            onPeriodRangeChange={handlePeriodRangeChange}
+            measurementUnit={measurementUnit}
+            onMeasurementUnitChange={handleMeasurementChange}
+            filterOptions={filterOptions}
+            filterValue={filterValue}
+            onFilterChange={handleFilterChange}
+            metrics={metrics}
+            selectedMetricIds={selectedMetricIds}
+            onSelectedMetricIdsChange={setSelectedMetricIds}
+            onSearch={handleSearch}
+            isSearchDisabled={isSearchDisabled}
+          />
+          {isLoadingFilter && <div className="card subtle">필터 로딩 중...</div>}
         </aside>
 
-        <div className="content-area">
-          {errorMessage && <div className="empty-state">Error: {errorMessage}</div>}
+        <section className="main-panel">
+          {errorMessage && <div className="card error">Error: {errorMessage}</div>}
+          {missingMetricIds.length > 0 && (
+            <div className="card warning">선택한 지표 중 일부는 현재 결과에 포함되지 않습니다.</div>
+          )}
           {isLoadingBase ? (
-            <section className="empty-state">지표 정보를 불러오는 중...</section>
+            <div className="card subtle">지표 정보를 불러오는 중...</div>
           ) : !showResults ? (
-            <section className="empty-state">옵션을 선택하고 조회를 눌러주세요.</section>
+            <div className="card subtle">옵션을 선택하고 조회를 눌러주세요.</div>
           ) : (
-            <div className="left-stack">
+            <div className="result-stack">
               <div className="breadcrumb">
                 {measurementUnit === "all"
                   ? ALL_LABEL
@@ -391,23 +568,76 @@ export default function Home() {
                   weeks={weeks}
                   metrics={selectedMetrics}
                   series={seriesByEntity[ALL_LABEL] ?? {}}
-                  primaryMetricId={primaryMetricId}
                 />
               ) : (
                 <EntityMetricTable
                   weeks={weeks}
                   entities={entities}
                   metrics={selectedMetrics}
-                  primaryMetricId={primaryMetricId}
                   seriesByEntity={seriesByEntity}
                 />
               )}
 
-              {isLoadingHeatmap && <div className="empty-state">데이터를 불러오는 중...</div>}
+              <div className="card report-card" ref={aiRef}>
+                <div className="card-title">데이터 심층 분석 리포트</div>
+                {isSummaryLoading ? (
+                  <p>요약을 생성하는 중...</p>
+                ) : summary ? (
+                  <>
+                    <h3>{summary.title}</h3>
+                    <ul>
+                      {summary.bullets.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                    {summary.caution && <p className="note">{summary.caution}</p>}
+                  </>
+                ) : (
+                  <p>조회 후 자동 요약이 표시됩니다.</p>
+                )}
+              </div>
+
+              <div className="card ai-card ai-card-inline">
+                <div className="card-title">Kevin AI 컨설턴트</div>
+                <div className="chat-messages">
+                  {chatMessages.length === 0 && (
+                    <div className="chat-empty">질문을 입력하면 데이터 기반으로 답변합니다.</div>
+                  )}
+                  {chatMessages.map((message) => (
+                    <div key={message.id} className={`chat-bubble ${message.role}`}>
+                      {message.content}
+                    </div>
+                  ))}
+                </div>
+                <div className="chat-input">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    placeholder="예: 이번 기간의 핵심 지표는 어떤 추세인가요?"
+                    onChange={(event) => setChatInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") handleChatSend();
+                    }}
+                  />
+                  <button type="button" onClick={handleChatSend} disabled={isChatLoading}>
+                    전송
+                  </button>
+                </div>
+              </div>
             </div>
           )}
-        </div>
+        </section>
       </section>
+
+      {showResults && (
+        <button
+          type="button"
+          className="ai-fab"
+          onClick={() => aiRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+        >
+          AI 분석 보러가기
+        </button>
+      )}
 
       {isFetching && (
         <div className="fetch-overlay">

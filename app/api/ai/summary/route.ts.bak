@@ -1,0 +1,98 @@
+import { NextResponse } from "next/server";
+
+type MetricSummary = {
+  metricId: string;
+  name: string;
+  latest: number | null;
+  delta: number | null;
+  format: "number" | "percent";
+};
+
+type SummaryContext = {
+  unit: string;
+  filter: string;
+  weeks: string[];
+  primaryMetricId: string;
+  metricSummaries: MetricSummary[];
+};
+
+type SummaryPayload = {
+  title: string;
+  bullets: string[];
+  caution?: string;
+};
+
+const MAX_BYTES = 200_000;
+
+const formatValue = (value: number | null, format: "number" | "percent") => {
+  if (value === null || Number.isNaN(value)) return "-";
+  if (format === "percent") return `${(value * 100).toFixed(1)}%`;
+  return value.toLocaleString("ko-KR");
+};
+
+const formatDelta = (value: number | null, format: "number" | "percent") => {
+  if (value === null || Number.isNaN(value)) return "-";
+  const sign = value >= 0 ? "+" : "";
+  if (format === "percent") return `${sign}${(value * 100).toFixed(1)}%p`;
+  return `${sign}${value.toLocaleString("ko-KR")}`;
+};
+
+export async function POST(request: Request) {
+  try {
+    const rawBody = await request.text();
+    if (rawBody.length > MAX_BYTES) {
+      return NextResponse.json({ error: "Payload too large." }, { status: 413 });
+    }
+
+    const parsed = JSON.parse(rawBody) as { context?: SummaryContext };
+    if (!parsed.context) {
+      return NextResponse.json({ error: "Missing context." }, { status: 400 });
+    }
+
+    const { weeks, metricSummaries, primaryMetricId, unit, filter } = parsed.context;
+    const rangeLabel = weeks.length ? `${weeks[0]} ~ ${weeks[weeks.length - 1]}` : "선택 기간";
+    const primary = metricSummaries.find((metric) => metric.metricId === primaryMetricId) ?? metricSummaries[0];
+
+    const sortedByDelta = [...metricSummaries]
+      .filter((metric) => typeof metric.delta === "number")
+      .sort((a, b) => Math.abs((b.delta ?? 0)) - Math.abs((a.delta ?? 0)));
+
+    const topMover = sortedByDelta[0];
+    const secondMover = sortedByDelta[1];
+
+    const bullets: string[] = [];
+
+    if (primary) {
+      bullets.push(
+        `핵심 지표 ${primary.name}는 최신값 ${formatValue(primary.latest, primary.format)}이며 전주 대비 ${formatDelta(
+          primary.delta,
+          primary.format
+        )} 변화가 있습니다.`
+      );
+    }
+
+    if (topMover) {
+      bullets.push(
+        `변동 폭이 큰 지표는 ${topMover.name}이며 최신값 ${formatValue(topMover.latest, topMover.format)}입니다.`
+      );
+    }
+
+    if (secondMover) {
+      bullets.push(
+        `${secondMover.name} 역시 ${formatDelta(secondMover.delta, secondMover.format)} 수준의 변화가 관측됩니다.`
+      );
+    }
+
+    bullets.push(`분석 범위는 ${rangeLabel} (${weeks.length}주)이며 단위는 ${unit} · ${filter} 입니다.`);
+
+    const summary: SummaryPayload = {
+      title: `데이터 요약 · ${rangeLabel}`,
+      bullets,
+      caution: "본 요약은 데이터 기반 참고용이며 원인 단정은 피합니다."
+    };
+
+    return NextResponse.json({ summary });
+  } catch (error) {
+    return NextResponse.json({ error: (error as Error).message || "Failed to build summary." }, { status: 500 });
+  }
+}

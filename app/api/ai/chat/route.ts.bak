@@ -1,0 +1,80 @@
+import { NextResponse } from "next/server";
+
+type MetricSummary = {
+  metricId: string;
+  name: string;
+  latest: number | null;
+  delta: number | null;
+  format: "number" | "percent";
+};
+
+type ChatContext = {
+  unit: string;
+  filter: string;
+  weeks: string[];
+  primaryMetricId: string;
+  metricSummaries: MetricSummary[];
+};
+
+const MAX_BYTES = 200_000;
+
+const formatValue = (value: number | null, format: "number" | "percent") => {
+  if (value === null || Number.isNaN(value)) return "-";
+  if (format === "percent") return `${(value * 100).toFixed(1)}%`;
+  return value.toLocaleString("ko-KR");
+};
+
+const formatDelta = (value: number | null, format: "number" | "percent") => {
+  if (value === null || Number.isNaN(value)) return "-";
+  const sign = value >= 0 ? "+" : "";
+  if (format === "percent") return `${sign}${(value * 100).toFixed(1)}%p`;
+  return `${sign}${value.toLocaleString("ko-KR")}`;
+};
+
+export async function POST(request: Request) {
+  try {
+    const rawBody = await request.text();
+    if (rawBody.length > MAX_BYTES) {
+      return NextResponse.json({ error: "Payload too large." }, { status: 413 });
+    }
+
+    const parsed = JSON.parse(rawBody) as { message?: string; context?: ChatContext };
+    if (!parsed.message || !parsed.context) {
+      return NextResponse.json({ error: "Missing message or context." }, { status: 400 });
+    }
+
+    const { message, context } = parsed;
+    const { weeks, metricSummaries, primaryMetricId, unit, filter } = context;
+    const rangeLabel = weeks.length ? `${weeks[0]} ~ ${weeks[weeks.length - 1]}` : "선택 기간";
+    const primary = metricSummaries.find((metric) => metric.metricId === primaryMetricId) ?? metricSummaries[0];
+
+    const replyParts: string[] = [];
+    replyParts.push(`질문을 확인했습니다. 현재 데이터 범위는 ${rangeLabel} (${weeks.length}주)이며 단위는 ${unit} · ${filter}입니다.`);
+
+    if (primary) {
+      replyParts.push(
+        `핵심 지표 ${primary.name}의 최신값은 ${formatValue(primary.latest, primary.format)}이고 전주 대비 ${formatDelta(
+          primary.delta,
+          primary.format
+        )} 변화가 있습니다.`
+      );
+    }
+
+    const movers = metricSummaries
+      .filter((metric) => typeof metric.delta === "number")
+      .sort((a, b) => Math.abs((b.delta ?? 0)) - Math.abs((a.delta ?? 0)))
+      .slice(0, 2);
+
+    if (movers.length) {
+      replyParts.push(
+        `변동 폭이 큰 지표로는 ${movers.map((metric) => metric.name).join(", ")} 등이 보이며, 원인은 추가 분석이 필요합니다.`
+      );
+    }
+
+    replyParts.push("추가로 궁금한 지표나 기간을 알려주시면 더 구체적으로 살펴보겠습니다.");
+
+    return NextResponse.json({ reply: replyParts.join(" ") });
+  } catch (error) {
+    return NextResponse.json({ error: (error as Error).message || "Failed to build reply." }, { status: 500 });
+  }
+}

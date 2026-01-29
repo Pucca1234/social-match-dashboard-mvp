@@ -14,14 +14,21 @@ type SparklineProps = {
 export default function Sparkline({
   values,
   width = 120,
-  height = 36,
-  stroke = "#1f6f5f",
+  height = 28,
+  stroke,
   labels = [],
   formatValue
 }: SparklineProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  const color = useMemo(() => {
+    if (stroke) return stroke;
+    if (!values.length) return "#2563eb";
+    const trend = values[values.length - 1] - values[0];
+    return trend < 0 ? "#dc2626" : "#2563eb";
+  }, [stroke, values]);
 
   const points = useMemo(() => {
     if (!values.length) return [] as { x: number; y: number }[];
@@ -71,9 +78,9 @@ export default function Sparkline({
       onMouseLeave={handleLeave}
     >
       <svg className="sparkline" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="sparkline">
-        {path && <path d={path} fill="none" strokeWidth="2" strokeLinecap="round" stroke={stroke} />}
+        {path && <path d={path} fill="none" strokeWidth="2" strokeLinecap="round" stroke={color} />}
         {hoverIndex !== null && points[hoverIndex] && (
-          <circle cx={points[hoverIndex].x} cy={points[hoverIndex].y} r="3.5" fill={stroke} />
+          <circle cx={points[hoverIndex].x} cy={points[hoverIndex].y} r="3.5" fill={color} />
         )}
       </svg>
       {tooltipContent && (
@@ -85,3 +92,4 @@ export default function Sparkline({
     </div>
   );
 }
+

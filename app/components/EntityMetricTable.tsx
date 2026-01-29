@@ -1,7 +1,7 @@
-﻿import type { CSSProperties } from "react";
-import { useState } from "react";
+﻿"use client";
+
+import type { CSSProperties } from "react";
 import { Entity, Metric } from "../types";
-import MetricTable from "./MetricTable";
 import Sparkline from "./Sparkline";
 import { formatValue } from "../lib/format";
 
@@ -9,7 +9,6 @@ type EntityMetricTableProps = {
   weeks: string[];
   entities: Entity[];
   metrics: Metric[];
-  primaryMetricId: string;
   seriesByEntity: Record<string, Record<string, number[]>>;
 };
 
@@ -24,106 +23,104 @@ const formatDelta = (metric: Metric, delta: number | null) => {
 };
 
 const getHeatColor = (values: number[], value: number) => {
-  if (!values.length) return "rgba(31, 111, 95, 0.15)";
+  if (!values.length) return "rgba(37, 99, 235, 0.04)";
   const min = Math.min(...values);
   const max = Math.max(...values);
-  if (min === max) return "rgba(31, 111, 95, 0.18)";
+  if (min === max) return "rgba(37, 99, 235, 0.08)";
   const ratio = (value - min) / (max - min);
-  const intensity = 0.12 + ratio * 0.5;
-  return `rgba(31, 111, 95, ${intensity})`;
+  const intensity = 0.04 + ratio * 0.25;
+  return `rgba(37, 99, 235, ${intensity})`;
 };
 
-export default function EntityMetricTable({
-  weeks,
-  entities,
-  metrics,
-  primaryMetricId,
-  seriesByEntity
-}: EntityMetricTableProps) {
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  const primaryMetric = metrics.find((metric) => metric.id === primaryMetricId) ?? metrics[0];
-
-  const toggleExpand = (id: string) => {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
+export default function EntityMetricTable({ weeks, entities, metrics, seriesByEntity }: EntityMetricTableProps) {
+  const isAnomaly = (values: number[]) => {
+    if (!values.length) return false;
+    const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+    const variance =
+      values.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / values.length;
+    const std = Math.sqrt(variance);
+    if (!std) return false;
+    return values.some((value) => Math.abs(value - mean) >= std * 2);
   };
 
   return (
-    <div className="panel metric-table">
-      <div className="panel-title">엔티티별 {primaryMetric?.name ?? "핵심 지표"}</div>
-      <div className="metric-grid" style={{ "--week-count": weeks.length } as CSSProperties}>
-        <div className="metric-row metric-header">
-          <div className="metric-cell metric-name">엔티티</div>
-          <div className="metric-cell metric-spark">추이</div>
-          {weeks.map((week) => (
-            <div key={week} className="metric-cell metric-week">
-              {week}
-            </div>
-          ))}
-        </div>
-        {entities.map((entity) => {
-          const series = seriesByEntity[entity.id] ?? {};
-          const values = series[primaryMetricId] ?? Array(weeks.length).fill(0);
-          const isExpanded = expandedIds.has(entity.id);
-
-          return (
-            <div key={entity.id} className="metric-row-group">
-              <div
-                className={`metric-row entity-row ${isExpanded ? "is-expanded" : ""}`}
-                onClick={() => toggleExpand(entity.id)}
-                role="button"
-              >
-                <div className="metric-cell metric-name">
-                  <span className="entity-label">{entity.name}</span>
-                  <span className="entity-toggle">{isExpanded ? "접기" : "상세"}</span>
-                </div>
-                <div className="metric-cell metric-spark">
-                  <Sparkline
-                    values={values}
-                    labels={weeks}
-                    formatValue={(value) => (primaryMetric ? formatValue(value, primaryMetric) : String(value))}
-                  />
-                </div>
-                {values.map((value, index) => {
-                  const delta = index + 1 < values.length ? value - values[index + 1] : null;
-                  const deltaLabel = primaryMetric ? formatDelta(primaryMetric, delta) : "-";
-                  return (
-                    <div
-                      key={`${entity.id}-${index}`}
-                      className="metric-cell metric-value"
-                      style={{ backgroundColor: getHeatColor(values, value) }}
-                    >
-                      <span className="metric-value-main">
-                        {primaryMetric ? formatValue(value, primaryMetric) : value}
-                      </span>
-                      <span className={`metric-delta ${delta !== null && delta < 0 ? "is-negative" : ""}`}>
-                        {delta !== null ? `(${deltaLabel})` : "-"}
-                      </span>
-                    </div>
-                  );
-                })}
+    <div className="card table-card">
+      <div className="card-title">엔티티별 지표 추이</div>
+      <div className="table-scroll">
+        <div className="data-grid entity-grid" style={{ "--week-count": weeks.length } as CSSProperties}>
+          <div className="data-row data-header">
+            <div className="data-cell data-entity">엔티티</div>
+            <div className="data-cell data-metric">지표명</div>
+            <div className="data-cell data-spark">추이</div>
+            {weeks.map((week) => (
+              <div key={week} className="data-cell data-week">
+                {week}
               </div>
-              {isExpanded && (
-                <div className="entity-detail">
-                  <MetricTable
-                    weeks={weeks}
-                    metrics={metrics}
-                    series={series}
-                    primaryMetricId={primaryMetricId}
-                    showHeader={false}
-                  />
+            ))}
+          </div>
+          {entities.flatMap((entity) => {
+            const series = seriesByEntity[entity.id] ?? {};
+            const entityHasAnomaly = metrics.some((metric) =>
+              isAnomaly(series[metric.id] ?? Array(weeks.length).fill(0))
+            );
+            return metrics.map((metric, index) => {
+              const values = series[metric.id] ?? Array(weeks.length).fill(0);
+              const isFirst = index === 0;
+              const metricHasAnomaly = isAnomaly(values);
+              return (
+                <div key={`${entity.id}-${metric.id}`} className="data-row">
+                  <div className={`data-cell data-entity ${isFirst ? "" : "is-empty"}`}>
+                    <span className="name-title">
+                      {entity.name}
+                      {isFirst && entityHasAnomaly && (
+                        <span className="anomaly-flag" title="이상치가 존재합니다">
+                          ⚠️
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="data-cell data-metric">
+                    <span className="name-title">
+                      {metric.name}
+                      {metricHasAnomaly && (
+                        <span className="anomaly-flag" title="이상치가 존재합니다">
+                          ⚠️
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="data-cell data-spark">
+                    <Sparkline
+                      values={values}
+                      labels={weeks}
+                      formatValue={(value) => formatValue(value, metric)}
+                    />
+                  </div>
+                  {values.map((value, indexValue) => {
+                    const delta = indexValue > 0 ? value - values[indexValue - 1] : null;
+                    const deltaLabel = formatDelta(metric, delta);
+                    return (
+                      <div
+                        key={`${entity.id}-${metric.id}-${indexValue}`}
+                        className="data-cell data-value"
+                        style={{ backgroundColor: getHeatColor(values, value) }}
+                      >
+                        <span className="value-main">{formatValue(value, metric)}</span>
+                        <span
+                          className={`value-delta ${delta !== null ? "has-delta" : ""} ${
+                            delta !== null && delta < 0 ? "is-negative" : ""
+                          }`}
+                        >
+                          {delta !== null ? `(${deltaLabel})` : "-"}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
-              )}
-            </div>
-          );
-        })}
+              );
+            });
+          })}
+        </div>
       </div>
     </div>
   );

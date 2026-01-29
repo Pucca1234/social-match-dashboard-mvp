@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "prebuild": "node scripts/check-utf8.mjs",
+    "predev": "node scripts/check-utf8.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.90.1",
