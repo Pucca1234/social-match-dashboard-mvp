@@ -245,7 +245,11 @@ drop index concurrently if exists idx_metricstore_metric;
 - Refresh/배치 실행은 **오프피크** 권장
 - MV refresh는 IO를 유발하므로 **주 1회 or 배치 직후 1회**가 적절
 
-### 4-2. MV 설계 (unpivot, week only, future week 제외)
+### 4-2. MV 설계 (unpivot, week only, future week 제외, cnt=MAX / rate=AVG)
+**정확도 최종 규칙**
+- cnt 계열은 **MAX 집계** (원천 그레인 중복으로 인한 더블카운팅 제거 목적)
+- rate 계열은 **AVG 집계**
+  - 적용 지표: progress_match_rate, match_open_rate, match_loss_rate
 ```
 create materialized view if not exists bigquery.weekly_agg_mv as
 select
@@ -256,7 +260,7 @@ select
   case
     when metric_id in ('progress_match_rate', 'match_open_rate', 'match_loss_rate')
       then avg(value)
-    else sum(value)
+    else max(value)
   end as value
 from (
   select
@@ -291,6 +295,82 @@ from (
   where s.period_type = 'week'
 ) t
 group by week, measure_unit, filter_value, metric_id;
+```
+
+### 4-2-1. 적용 절차 (drop → create → index → refresh)
+**기본 권장: non-concurrently로 순서 실행**
+```
+drop materialized view if exists bigquery.weekly_agg_mv;
+
+create materialized view bigquery.weekly_agg_mv as
+select
+  week,
+  measure_unit,
+  filter_value,
+  metric_id,
+  case
+    when metric_id in ('progress_match_rate', 'match_open_rate', 'match_loss_rate')
+      then avg(value)
+    else max(value)
+  end as value
+from (
+  select
+    s.week,
+    case
+      when s.area_group is not null then 'area_group'
+      when s.area is not null then 'area'
+      when s.stadium_group is not null then 'stadium_group'
+      when s.stadium is not null then 'stadium'
+      else 'all'
+    end as measure_unit,
+    case
+      when s.area_group is not null then s.area_group
+      when s.area is not null then s.area
+      when s.stadium_group is not null then s.stadium_group
+      when s.stadium is not null then s.stadium
+      else '전체'
+    end as filter_value,
+    m.metric_id,
+    m.value
+  from bigquery.data_mart_1_social_match s
+  join bigquery.weeks_view w on w.week = s.week
+  cross join lateral (
+    values
+      ('total_match_cnt', s.total_match_cnt),
+      ('setting_match_cnt', s.setting_match_cnt),
+      ('progress_match_cnt', s.progress_match_cnt),
+      ('progress_match_rate', s.progress_match_rate),
+      ('match_open_rate', s.match_open_rate),
+      ('match_loss_rate', s.match_loss_rate)
+  ) as m(metric_id, value)
+  where s.period_type = 'week'
+) t
+group by week, measure_unit, filter_value, metric_id;
+
+create index if not exists idx_weekly_agg_mv_unit_week_metric
+on bigquery.weekly_agg_mv (measure_unit, week, metric_id);
+
+create index if not exists idx_weekly_agg_mv_unit_filter_week_metric
+on bigquery.weekly_agg_mv (measure_unit, filter_value, week, metric_id);
+
+create unique index if not exists idx_weekly_agg_mv_uniq
+on bigquery.weekly_agg_mv (week, measure_unit, filter_value, metric_id);
+
+refresh materialized view bigquery.weekly_agg_mv;
+```
+
+**참고: concurrently 사용 시**
+- Supabase SQL Editor에서 `refresh materialized view concurrently`는 트랜잭션 블록 내에서 실행 불가
+- 위 unique index가 반드시 필요
+
+### 4-2-2. 대안 (rate도 max로 통일 - 정확도 trade-off)
+```
+-- 집계 부분만 변경
+case
+  when metric_id in ('progress_match_rate', 'match_open_rate', 'match_loss_rate')
+    then max(value)
+  else max(value)
+end as value
 ```
 
 ### 4-3. Refresh 방식 2안
@@ -336,3 +416,65 @@ on bigquery.weekly_agg_mv (measure_unit, filter_value, week, metric_id);
 - 원천 테이블 스키마 변경 없음
 - 신규 리소스는 별도 네이밍으로 분리
 - 기존 API 응답 구조 유지
+
+## (6) 정확도 검증 SQL (cnt 과대집계 수정 확인)
+**대상 주차 예시: 26.02.16 - 02.22**
+
+1) 전체(all) total_match_cnt이 과대에서 정상으로 내려가는지 확인
+```
+select
+  week,
+  sum(value) as total_from_all
+from bigquery.weekly_agg_mv
+where measure_unit = 'all'
+  and metric_id = 'total_match_cnt'
+  and week = '26.02.16 - 02.22'
+group by 1;
+```
+
+2) area_group 값이 sum이 아닌 max 기반으로 내려갔는지 확인
+```
+select
+  week,
+  filter_value as area_group,
+  sum(value) as sum_cnt,
+  max(value) as max_cnt
+from bigquery.weekly_agg_mv
+where measure_unit = 'area_group'
+  and metric_id = 'total_match_cnt'
+  and week = '26.02.16 - 02.22'
+group by 1,2
+order by sum_cnt desc;
+```
+
+3) all 정의 검증: all = sum(area_group)
+```
+with ag as (
+  select
+    week,
+    sum(value) as total_from_area_group
+  from bigquery.weekly_agg_mv
+  where measure_unit = 'area_group'
+    and metric_id = 'total_match_cnt'
+    and week = '26.02.16 - 02.22'
+  group by 1
+),
+allv as (
+  select
+    week,
+    sum(value) as total_from_all
+  from bigquery.weekly_agg_mv
+  where measure_unit = 'all'
+    and metric_id = 'total_match_cnt'
+    and week = '26.02.16 - 02.22'
+  group by 1
+)
+select
+  ag.week,
+  ag.total_from_area_group,
+  allv.total_from_all,
+  (ag.total_from_area_group - allv.total_from_all) as diff
+from ag
+join allv on ag.week = allv.week;
+```
+**기대값:** diff = 0 (all = area_group 합으로 정합성 확정)

@@ -73,6 +73,7 @@ Kevin is a single-page analytics dashboard built with Next.js (App Router) to an
 - `/api/heatmap` accepts `weeks`, `measureUnit`, `filterValue`, `metrics`.
 - Server must apply `period_type = week` and `week IN weeks`.
 - Heatmap 조회는 MV(`weekly_agg_mv`) 기반으로 수행해 병목을 최소화한다.
+- cnt 계열은 MAX, rate 계열은 AVG로 집계해 원천 중복에 따른 과대 합산을 제거한다.
 
 ### 5.4 Table Rendering
 - Columns: entity / metric / sparkline / weeks.

@@ -61,9 +61,10 @@ npm run dev
 
 ### 2) 무엇을
 - heatmap 조회를 **materialized view(weekly_agg_mv)** 기반으로 전환
+- **cnt 계열 MAX / rate 계열 AVG** 집계 규칙으로 과대 집계 제거
 - MV 인덱스/unique index를 통해 **concurrently refresh 가능**하게 구성
 - `/api/heatmap`, `/api/metrics` 성능 로그에 캐시 히트 여부를 명확히 표시
-- `PERF_OPTIMIZATION.md`에 운영/검증/SQL 절차 정리
+- `PERF_OPTIMIZATION.md`에 정확도 검증/운영/SQL 절차 정리
 
 ### 3) 어떻게
 - MV에서 `week, measure_unit, filter_value, metric_id` 유일 그레인으로 집계
