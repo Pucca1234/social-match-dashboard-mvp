@@ -39,9 +39,9 @@ Kevin is a single-page analytics dashboard built with Next.js (App Router) to an
 
 ## 4. Information Architecture
 ### Layout
-- Left panel: options (period, unit, filter, metrics).
-- Main panel: results (table + summary + AI chat).
-- Floating CTA to jump to AI summary.
+- Top horizontal control bar (period/unit/filter/metrics).
+- Main panel: results table.
+- Floating CTA opens AI report modal (chat-style).
 
 ### Controls
 - Period unit: fixed to “week”.
@@ -55,7 +55,7 @@ Kevin is a single-page analytics dashboard built with Next.js (App Router) to an
   - metric name
   - sparkline
   - weekly values + deltas
-- AI summary + chat block at the bottom.
+- AI summary + chat inside a right-bottom modal.
 
 ## 5. Functional Requirements
 ### 5.1 Metrics Loading
@@ -73,8 +73,8 @@ Kevin is a single-page analytics dashboard built with Next.js (App Router) to an
 ### 5.4 Table Rendering
 - Columns: entity / metric / sparkline / weeks.
 - Heatmap intensity is normalized per row.
-- Deltas are computed vs previous week.
-- Anomaly flag appears if z-score >= 2 (visual warning).
+- Deltas are computed vs previous week (latest → past).
+- UI does not surface anomaly icons (calculation may remain internal).
 
 ### 5.5 UI Feedback
 - Loading overlay on fetch.
@@ -95,7 +95,7 @@ Kevin is a single-page analytics dashboard built with Next.js (App Router) to an
 ## 7. UX & Visual Guidelines
 - Light, card-based layout.
 - Heatmap values with blue intensity.
-- Sparklines: blue for 상승, red for 감소.
+- Sparklines: blue only (no trend-based color change).
 - Compact row height for dense tables.
 
 ## 8. Validation Rules

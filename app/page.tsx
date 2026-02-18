@@ -142,12 +142,13 @@ const buildContext = (
     measurementUnit === "all" ? ALL_LABEL : unitLabel[measurementUnit] ?? measurementUnit;
   const entityKey = measurementUnit === "all" ? ALL_LABEL : filterValue;
   const series = seriesByEntity[entityKey] ?? seriesByEntity[ALL_LABEL] ?? {};
-  const latestIndex = weeks.length - 1;
+  const latestIndex = 0;
 
   const metricSummaries = metrics.map((metric) => {
     const values = series[metric.id] ?? [];
     const latest = values[latestIndex] ?? null;
-    const delta = latestIndex > 0 ? (values[latestIndex] ?? 0) - (values[latestIndex - 1] ?? 0) : null;
+    const delta =
+      values.length > 1 ? (values[latestIndex] ?? 0) - (values[latestIndex + 1] ?? 0) : null;
     return { metricId: metric.id, name: metric.name, latest, delta, format: metric.format };
   });
 
@@ -165,6 +166,8 @@ export default function Home() {
   const [periodRangeValue, setPeriodRangeValue] = useState("recent_8");
   const [measurementUnit, setMeasurementUnit] = useState<MeasurementUnit>("all");
   const [filterValue, setFilterValue] = useState(ALL_VALUE);
+  const [appliedMeasurementUnit, setAppliedMeasurementUnit] = useState<MeasurementUnit>("all");
+  const [appliedFilterValue, setAppliedFilterValue] = useState(ALL_VALUE);
 
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [selectedMetricIds, setSelectedMetricIds] = useState<string[]>([]);
@@ -192,8 +195,8 @@ export default function Home() {
   const [errorLogs, setErrorLogs] = useState<ErrorLogItem[]>([]);
   const [isErrorLogOpen, setIsErrorLogOpen] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
+  const [isReportOpen, setIsReportOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
-  const aiRef = useRef<HTMLDivElement | null>(null);
 
   const pushError = (message: string, detail?: string) => {
     setErrorLogs((prev) => {
@@ -384,7 +387,7 @@ export default function Home() {
       const weeksResponse = await fetchJson<{ weeks: string[] }>(`/api/weeks?n=${size}`, {
         signal: controller.signal
       });
-      const nextWeeks = weeksResponse.weeks ?? [];
+      const nextWeeks = (weeksResponse.weeks ?? []).slice().reverse();
       if (!nextWeeks.length) {
         setErrorMessage("조건에 맞는 주차 데이터가 없습니다.");
         pushError("조건에 맞는 주차 데이터가 없습니다.");
@@ -407,7 +410,7 @@ export default function Home() {
         body: JSON.stringify({
           measureUnit: measurementUnit,
           filterValue: filterValue === ALL_VALUE ? null : filterValue,
-          weeks: nextWeeks,
+        weeks: nextWeeks,
           metrics: metricIdsForQuery
         })
       });
@@ -421,6 +424,8 @@ export default function Home() {
 
       setEntities(nextEntities);
       setSeriesByEntity(nextSeries);
+      setAppliedMeasurementUnit(measurementUnit);
+      setAppliedFilterValue(filterValue);
       setShowResults(true);
 
       const context = buildContext(
@@ -458,17 +463,14 @@ export default function Home() {
   const handleMeasurementChange = (value: MeasurementUnit) => {
     setMeasurementUnit(value);
     setFilterValue(ALL_VALUE);
-    setShowResults(false);
   };
 
   const handleFilterChange = (value: string) => {
     setFilterValue(value);
-    setShowResults(false);
   };
 
   const handlePeriodRangeChange = (value: string) => {
     setPeriodRangeValue(value);
-    setShowResults(false);
   };
 
   const handleChatSend = async () => {
@@ -485,8 +487,8 @@ export default function Home() {
         selectedMetrics,
         selectedMetrics[0]?.id ?? null,
         seriesByEntity,
-        measurementUnit,
-        filterValue === ALL_VALUE ? ALL_LABEL : filterValue
+        appliedMeasurementUnit,
+        appliedFilterValue === ALL_VALUE ? ALL_LABEL : appliedFilterValue
       );
       const response = await fetchJson<{ reply: string }>("/api/ai/chat", {
         method: "POST",
@@ -508,6 +510,15 @@ export default function Home() {
   };
 
   const isSearchDisabled = isLoadingBase || isLoadingHeatmap;
+
+  useEffect(() => {
+    if (!isReportOpen) return;
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsReportOpen(false);
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [isReportOpen]);
 
   return (
     <main className="app-shell">
@@ -557,12 +568,14 @@ export default function Home() {
           ) : (
             <div className="result-stack">
               <div className="breadcrumb">
-                {measurementUnit === "all"
+                {appliedMeasurementUnit === "all"
                   ? ALL_LABEL
-                  : `${unitLabel[measurementUnit]} · ${filterValue === ALL_VALUE ? "전체" : filterValue}`}
+                  : `${unitLabel[appliedMeasurementUnit]} · ${
+                      appliedFilterValue === ALL_VALUE ? "전체" : appliedFilterValue
+                    }`}
               </div>
 
-              {measurementUnit === "all" ? (
+              {appliedMeasurementUnit === "all" ? (
                 <MetricTable
                   title="전체 지표 추이"
                   weeks={weeks}
@@ -578,8 +591,32 @@ export default function Home() {
                 />
               )}
 
-              <div className="card report-card" ref={aiRef}>
-                <div className="card-title">데이터 심층 분석 리포트</div>
+            </div>
+          )}
+        </section>
+      </section>
+
+      {showResults && (
+        <button
+          type="button"
+          className="ai-fab"
+          onClick={() => setIsReportOpen(true)}
+        >
+          AI 분석 리포트
+        </button>
+      )}
+
+      {isReportOpen && (
+        <div className="report-modal-overlay" onClick={() => setIsReportOpen(false)}>
+          <div className="report-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="report-modal-header">
+              <div className="card-title">AI 분석 리포트</div>
+              <button type="button" className="report-modal-close" onClick={() => setIsReportOpen(false)}>
+                닫기
+              </button>
+            </div>
+            <div className="report-modal-body">
+              <div className="report-summary">
                 {isSummaryLoading ? (
                   <p>요약을 생성하는 중...</p>
                 ) : summary ? (
@@ -596,9 +633,7 @@ export default function Home() {
                   <p>조회 후 자동 요약이 표시됩니다.</p>
                 )}
               </div>
-
-              <div className="card ai-card ai-card-inline">
-                <div className="card-title">Kevin AI 컨설턴트</div>
+              <div className="report-chat">
                 <div className="chat-messages">
                   {chatMessages.length === 0 && (
                     <div className="chat-empty">질문을 입력하면 데이터 기반으로 답변합니다.</div>
@@ -625,18 +660,8 @@ export default function Home() {
                 </div>
               </div>
             </div>
-          )}
-        </section>
-      </section>
-
-      {showResults && (
-        <button
-          type="button"
-          className="ai-fab"
-          onClick={() => aiRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-        >
-          AI 분석 보러가기
-        </button>
+          </div>
+        </div>
       )}
 
       {isFetching && (

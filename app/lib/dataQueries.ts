@@ -32,6 +32,8 @@ const applyBaseFilters = (query: any) =>
     .is("hour", null)
     .is("time", null);
 
+const applyWeekOnlyFilter = (query: any) => query.eq("period_type", "week");
+
 const isBlank = (value: unknown) => value === null || value === undefined || String(value).trim() === "";
 
 const WEEK_LIMIT_DEFAULT = 104;
@@ -106,7 +108,7 @@ const buildWeekEntries = async (limit?: number) => {
   for (let page = 0; page < maxPages; page += 1) {
     const from = page * pageSize;
     const to = from + pageSize - 1;
-    const { data, error } = await applyBaseFilters(
+    const { data, error } = await applyWeekOnlyFilter(
       schemaClient.from(tableName(BASE_TABLE)).select("week")
     )
       .order("week", { ascending: false })
@@ -129,9 +131,35 @@ const buildWeekEntries = async (limit?: number) => {
     if (uniqueWeeks.length >= effectiveLimit) break;
   }
 
+  if (uniqueWeeks.length < effectiveLimit) {
+    for (let page = 0; page < maxPages && uniqueWeeks.length < effectiveLimit; page += 1) {
+      const from = page * pageSize;
+      const to = from + pageSize - 1;
+      const { data, error } = await applyWeekOnlyFilter(
+        schemaClient.from(tableName(BASE_TABLE)).select("week")
+      )
+        .order("week", { ascending: false })
+        .range(from, to);
+      if (error) throw new Error(error.message);
+      if (!data || data.length === 0) break;
+
+      for (const row of data as { week?: string | null }[]) {
+        const week = typeof row.week === "string" ? row.week.trim() : "";
+        if (!week || seen.has(week)) continue;
+        const startDate = parseWeekStartLocal(week);
+        if (!startDate) continue;
+        if (startDate > currentWeekStart) continue;
+        if (startDate < cutoff) continue;
+        seen.add(week);
+        uniqueWeeks.push(week);
+        if (uniqueWeeks.length >= effectiveLimit) break;
+      }
+    }
+  }
+
   if (uniqueWeeks.length === 0) return [];
 
-  const { data: dateRows, error: dateError } = await applyBaseFilters(
+  const { data: dateRows, error: dateError } = await applyWeekOnlyFilter(
     schemaClient.from(tableName(BASE_TABLE)).select("week,year,month,day")
   ).in("week", uniqueWeeks);
   if (dateError) throw new Error(dateError.message);

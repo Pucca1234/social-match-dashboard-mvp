@@ -33,16 +33,6 @@ const getHeatColor = (values: number[], value: number) => {
 };
 
 export default function EntityMetricTable({ weeks, entities, metrics, seriesByEntity }: EntityMetricTableProps) {
-  const isAnomaly = (values: number[]) => {
-    if (!values.length) return false;
-    const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
-    const variance =
-      values.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / values.length;
-    const std = Math.sqrt(variance);
-    if (!std) return false;
-    return values.some((value) => Math.abs(value - mean) >= std * 2);
-  };
-
   return (
     <div className="card table-card">
       <div className="card-title">엔티티별 지표 추이</div>
@@ -60,34 +50,16 @@ export default function EntityMetricTable({ weeks, entities, metrics, seriesByEn
           </div>
           {entities.flatMap((entity) => {
             const series = seriesByEntity[entity.id] ?? {};
-            const entityHasAnomaly = metrics.some((metric) =>
-              isAnomaly(series[metric.id] ?? Array(weeks.length).fill(0))
-            );
             return metrics.map((metric, index) => {
               const values = series[metric.id] ?? Array(weeks.length).fill(0);
               const isFirst = index === 0;
-              const metricHasAnomaly = isAnomaly(values);
               return (
                 <div key={`${entity.id}-${metric.id}`} className="data-row">
                   <div className={`data-cell data-entity ${isFirst ? "" : "is-empty"}`}>
-                    <span className="name-title">
-                      {entity.name}
-                      {isFirst && entityHasAnomaly && (
-                        <span className="anomaly-flag" title="이상치가 존재합니다">
-                          ⚠️
-                        </span>
-                      )}
-                    </span>
+                    <span className="name-title">{entity.name}</span>
                   </div>
                   <div className="data-cell data-metric">
-                    <span className="name-title">
-                      {metric.name}
-                      {metricHasAnomaly && (
-                        <span className="anomaly-flag" title="이상치가 존재합니다">
-                          ⚠️
-                        </span>
-                      )}
-                    </span>
+                    <span className="name-title">{metric.name}</span>
                   </div>
                   <div className="data-cell data-spark">
                     <Sparkline
@@ -97,7 +69,7 @@ export default function EntityMetricTable({ weeks, entities, metrics, seriesByEn
                     />
                   </div>
                   {values.map((value, indexValue) => {
-                    const delta = indexValue > 0 ? value - values[indexValue - 1] : null;
+                    const delta = indexValue < values.length - 1 ? value - values[indexValue + 1] : null;
                     const deltaLabel = formatDelta(metric, delta);
                     return (
                       <div

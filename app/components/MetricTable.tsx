@@ -38,15 +38,6 @@ const getHeatColor = (values: number[], value: number) => {
   return `rgba(37, 99, 235, ${intensity})`;
 };
 
-const hasAnomaly = (values: number[]) => {
-  if (!values.length) return false;
-  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
-  const variance = values.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / values.length;
-  const std = Math.sqrt(variance);
-  if (!std) return false;
-  return values.some((value) => Math.abs(value - mean) >= std * 2);
-};
-
 export default function MetricTable({
   title,
   weeks,
@@ -77,20 +68,13 @@ export default function MetricTable({
           return (
             <div key={metric.id} className={`data-row ${metric.id === primaryMetricId ? "is-primary" : ""}`}>
               <div className="data-cell data-name">
-                <span className="name-title">
-                  {metric.name}
-                  {hasAnomaly(values) && (
-                    <span className="anomaly-flag" title="이상치가 존재합니다">
-                      ⚠️
-                    </span>
-                  )}
-                </span>
+                <span className="name-title">{metric.name}</span>
               </div>
             <div className="data-cell data-spark">
               <Sparkline values={values} labels={weeks} formatValue={(value) => formatValue(value, metric)} />
             </div>
             {values.map((value, index) => {
-              const delta = index > 0 ? value - values[index - 1] : null;
+              const delta = index < values.length - 1 ? value - values[index + 1] : null;
               const deltaLabel = formatDelta(metric, delta);
               return (
                 <div

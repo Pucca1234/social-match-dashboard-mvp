@@ -367,13 +367,13 @@ main {
 
 .data-row {
   display: grid;
-  grid-template-columns: 220px 140px repeat(var(--week-count), minmax(120px, 1fr));
+  grid-template-columns: 220px 140px repeat(var(--week-count), minmax(60px, 1fr));
   gap: 8px;
   align-items: stretch;
 }
 
 .entity-grid .data-row {
-  grid-template-columns: 180px 100px 90px repeat(var(--week-count), minmax(120px, 1fr));
+  grid-template-columns: 180px 100px 90px repeat(var(--week-count), minmax(60px, 1fr));
 }
 
 .data-row.is-primary .name-title {
@@ -465,10 +465,61 @@ main {
   height: 28px;
 }
 
-.anomaly-flag {
-  margin-left: 6px;
+.report-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.3);
+  z-index: 300;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-end;
+  padding: 16px;
+}
+
+.report-modal {
+  width: min(420px, 100%);
+  max-height: 80vh;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+}
+
+.report-modal-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.report-modal-close {
+  border: none;
+  background: transparent;
+  color: var(--muted);
   font-size: 12px;
-  cursor: help;
+  cursor: pointer;
+}
+
+.report-modal-body {
+  padding: 12px 16px 16px;
+  display: grid;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.report-summary h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.report-summary ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
 }
 
 .sparkline-wrap {
@@ -750,10 +801,10 @@ main {
   }
 
   .data-row {
-    grid-template-columns: 160px 120px repeat(var(--week-count), minmax(100px, 1fr));
+    grid-template-columns: 160px 120px repeat(var(--week-count), minmax(60px, 1fr));
   }
 
   .entity-grid .data-row {
-    grid-template-columns: 140px 100px 90px repeat(var(--week-count), minmax(100px, 1fr));
+    grid-template-columns: 140px 100px 90px repeat(var(--week-count), minmax(60px, 1fr));
   }
 }
