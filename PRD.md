@@ -31,6 +31,7 @@ Kevin is a single-page analytics dashboard built with Next.js (App Router) to an
 - Tables:
   - `bigquery.data_mart_1_social_match`
   - `bigquery.metric_store_native`
+  - `bigquery.weeks_view` (week_start_date 계산 및 KST 기준 과거 주차 필터용 VIEW)
 
 ### Period Rules
 - Period type is week only.
@@ -65,6 +66,7 @@ Kevin is a single-page analytics dashboard built with Next.js (App Router) to an
 
 ### 5.2 Weeks Loading
 - `/api/weeks?n=8|12|24` returns most recent weeks only.
+- Uses `bigquery.weeks_view` so week_start_date는 DB에서 계산/필터링됨.
 
 ### 5.3 Heatmap Query
 - `/api/heatmap` accepts `weeks`, `measureUnit`, `filterValue`, `metrics`.

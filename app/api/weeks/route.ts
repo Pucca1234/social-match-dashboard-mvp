@@ -26,15 +26,18 @@ export async function GET(request: Request) {
     if (includeStartDate) {
       const order = range === "latest" ? "desc" : "asc";
       const weeks = await getWeeksData({ limit, order });
+      console.log("[weeks] n=%s count=%s", limit ?? "all", weeks.length);
       return NextResponse.json({ weeks });
     }
 
     if (range === "latest") {
       const weeks = await getWeeksData({ limit, order: "desc" });
+      console.log("[weeks] n=%s count=%s", limit ?? "all", weeks.length);
       return NextResponse.json({ weeks: weeks.map((entry) => entry.week) });
     }
 
     const weeks = await getWeeksData({ limit, order: "asc" });
+    console.log("[weeks] n=%s count=%s", limit ?? "all", weeks.length);
     return NextResponse.json({ weeks: weeks.map((entry) => entry.week) });
   } catch (error) {
     return NextResponse.json(

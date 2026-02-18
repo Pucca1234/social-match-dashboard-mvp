@@ -38,162 +38,26 @@ const isBlank = (value: unknown) => value === null || value === undefined || Str
 
 const WEEK_LIMIT_DEFAULT = 104;
 
-const parseWeekStart = (weekLabel: string) => {
-  const match = weekLabel.match(/^(\d{2})\.(\d{2})\.(\d{2})/);
-  if (!match) return null;
-  const year = 2000 + Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  if (!year || !month || !day) return null;
-  return new Date(Date.UTC(year, month - 1, day));
-};
-
-const parseWeekStartLocal = (weekLabel: string) => {
-  const match = weekLabel.match(/^(\d{2})\.(\d{2})\.(\d{2})/);
-  if (!match) return null;
-  const year = 2000 + Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  if (!year || !month || !day) return null;
-  return new Date(year, month - 1, day);
-};
-
-const toStartDate = (row: { week?: string | null; year?: number | null; month?: number | null; day?: number | null }) => {
-  if (
-    typeof row.year === "number" &&
-    typeof row.month === "number" &&
-    typeof row.day === "number" &&
-    row.year > 0 &&
-    row.month > 0 &&
-    row.day > 0
-  ) {
-    return new Date(Date.UTC(row.year, row.month - 1, row.day));
-  }
-  const weekLabel = typeof row.week === "string" ? row.week.trim() : "";
-  return weekLabel ? parseWeekStart(weekLabel) : null;
-};
-
-const formatDate = (date: Date | null) => (date ? date.toISOString().slice(0, 10) : null);
-
 type WeekEntry = { week: string; startDate: string | null };
-
-const parseStartDateLocal = (value: string | null) => {
-  if (!value) return null;
-  const [year, month, day] = value.split("-").map((part) => Number(part));
-  if (!year || !month || !day) return null;
-  return new Date(year, month - 1, day);
-};
-
-const getCurrentWeekWindow = (limit: number) => {
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const day = todayStart.getDay();
-  const diffToMonday = (day + 6) % 7;
-  const currentWeekStart = new Date(todayStart);
-  currentWeekStart.setDate(currentWeekStart.getDate() - diffToMonday);
-  const cutoff = new Date(currentWeekStart);
-  cutoff.setDate(cutoff.getDate() - (limit - 1) * 7);
-  return { cutoff, currentWeekStart };
-};
 
 const buildWeekEntries = async (limit?: number) => {
   const effectiveLimit = typeof limit === "number" && limit > 0 ? limit : WEEK_LIMIT_DEFAULT;
-  const { cutoff, currentWeekStart } = getCurrentWeekWindow(effectiveLimit);
-  const pageSize = 500;
-  const maxPages = 20;
 
-  const uniqueWeeks: string[] = [];
-  const seen = new Set<string>();
+  const { data, error } = await schemaClient
+    .from(tableName("weeks_view"))
+    .select("week,week_start_date")
+    .order("week_start_date", { ascending: false })
+    .limit(effectiveLimit);
 
-  for (let page = 0; page < maxPages; page += 1) {
-    const from = page * pageSize;
-    const to = from + pageSize - 1;
-    const { data, error } = await applyWeekOnlyFilter(
-      schemaClient.from(tableName(BASE_TABLE)).select("week")
-    )
-      .order("week", { ascending: false })
-      .range(from, to);
-    if (error) throw new Error(error.message);
-    if (!data || data.length === 0) break;
+  if (error) throw new Error(error.message);
 
-    for (const row of data as { week?: string | null }[]) {
-      const week = typeof row.week === "string" ? row.week.trim() : "";
-      if (!week || seen.has(week)) continue;
-      const startDate = parseWeekStartLocal(week);
-      if (!startDate) continue;
-      if (startDate > currentWeekStart) continue;
-      if (startDate < cutoff) continue;
-      seen.add(week);
-      uniqueWeeks.push(week);
-      if (uniqueWeeks.length >= effectiveLimit) break;
-    }
-
-    if (uniqueWeeks.length >= effectiveLimit) break;
-  }
-
-  if (uniqueWeeks.length < effectiveLimit) {
-    for (let page = 0; page < maxPages && uniqueWeeks.length < effectiveLimit; page += 1) {
-      const from = page * pageSize;
-      const to = from + pageSize - 1;
-      const { data, error } = await applyWeekOnlyFilter(
-        schemaClient.from(tableName(BASE_TABLE)).select("week")
-      )
-        .order("week", { ascending: false })
-        .range(from, to);
-      if (error) throw new Error(error.message);
-      if (!data || data.length === 0) break;
-
-      for (const row of data as { week?: string | null }[]) {
-        const week = typeof row.week === "string" ? row.week.trim() : "";
-        if (!week || seen.has(week)) continue;
-        const startDate = parseWeekStartLocal(week);
-        if (!startDate) continue;
-        if (startDate > currentWeekStart) continue;
-        if (startDate < cutoff) continue;
-        seen.add(week);
-        uniqueWeeks.push(week);
-        if (uniqueWeeks.length >= effectiveLimit) break;
-      }
-    }
-  }
-
-  if (uniqueWeeks.length === 0) return [];
-
-  const { data: dateRows, error: dateError } = await applyWeekOnlyFilter(
-    schemaClient.from(tableName(BASE_TABLE)).select("week,year,month,day")
-  ).in("week", uniqueWeeks);
-  if (dateError) throw new Error(dateError.message);
-
-  const map = new Map<string, { week: string; startDate: Date | null }>();
-  (dateRows ?? []).forEach((row: any) => {
-    const typed = row as { week?: string | null; year?: number | null; month?: number | null; day?: number | null };
-    const week = typeof typed.week === "string" ? typed.week.trim() : "";
-    if (!week) return;
-    const startDate = toStartDate(typed);
-    const existing = map.get(week);
-    if (!existing) {
-      map.set(week, { week, startDate });
-      return;
-    }
-    if (startDate && (!existing.startDate || startDate > existing.startDate)) {
-      existing.startDate = startDate;
-    }
-  });
-
-  uniqueWeeks.forEach((week) => {
-    if (!map.has(week)) {
-      map.set(week, { week, startDate: parseWeekStart(week) });
-    } else if (!map.get(week)?.startDate) {
-      map.get(week)!.startDate = parseWeekStart(week);
-    }
-  });
-
-  return uniqueWeeks
-    .map((week) => {
-      const entry = map.get(week);
-      return { week, startDate: formatDate(entry?.startDate ?? null) };
-    })
-    .filter(Boolean);
+  const rows = (data ?? []) as { week?: string | null; week_start_date?: string | null }[];
+  return rows
+    .map((row) => ({
+      week: typeof row.week === "string" ? row.week.trim() : "",
+      startDate: row.week_start_date ?? null
+    }))
+    .filter((row) => row.week);
 };
 
 export async function getWeeksData(options?: { limit?: number; order?: "asc" | "desc" }) {
