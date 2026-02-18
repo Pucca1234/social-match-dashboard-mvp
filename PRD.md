@@ -32,6 +32,7 @@ Kevin is a single-page analytics dashboard built with Next.js (App Router) to an
   - `bigquery.data_mart_1_social_match`
   - `bigquery.metric_store_native`
   - `bigquery.weeks_view` (week_start_date 계산 및 KST 기준 과거 주차 필터용 VIEW)
+  - `bigquery.weekly_agg_mv` (heatmap 성능 최적화용 MV, 원천 테이블 변경 없음)
 
 ### Period Rules
 - Period type is week only.
@@ -71,6 +72,7 @@ Kevin is a single-page analytics dashboard built with Next.js (App Router) to an
 ### 5.3 Heatmap Query
 - `/api/heatmap` accepts `weeks`, `measureUnit`, `filterValue`, `metrics`.
 - Server must apply `period_type = week` and `week IN weeks`.
+- Heatmap 조회는 MV(`weekly_agg_mv`) 기반으로 수행해 병목을 최소화한다.
 
 ### 5.4 Table Rendering
 - Columns: entity / metric / sparkline / weeks.
@@ -108,6 +110,7 @@ Kevin is a single-page analytics dashboard built with Next.js (App Router) to an
 ## 9. Risks & Mitigations
 - UTF-8 encoding breaks build -> enforced via check script + editor config.
 - Query timeouts -> minimize columns and enforce week filter.
+- Heatmap query bottleneck -> MV + MV index + concurrently refresh 운영.
 - Large payloads -> limit context size for AI endpoints.
 
 ## 10. Future Enhancements (Optional)

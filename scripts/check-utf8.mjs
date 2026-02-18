@@ -2,6 +2,7 @@
 import { extname, join } from "node:path";
 
 const TARGET_DIRS = ["app", "lib", "scripts", "components"]; // components exists if added later
+const ROOT_FILES = ["README.md", "PRD.md", "PERF_OPTIMIZATION.md"];
 const TARGET_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".json", ".css", ".md"]);
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -27,6 +28,11 @@ const main = async () => {
   const files = [];
   for (const dir of TARGET_DIRS) {
     files.push(...(await collectFiles(dir, root)));
+  }
+  for (const file of ROOT_FILES) {
+    if (shouldScan(file)) {
+      files.push(file);
+    }
   }
 
   const invalid = [];

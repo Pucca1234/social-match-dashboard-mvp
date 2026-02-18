@@ -14,6 +14,7 @@ const ALL_LABEL = "전체";
 const SCHEMA_NAME = "bigquery";
 const BASE_TABLE = "data_mart_1_social_match";
 const METRIC_TABLE = "metric_store_native";
+const WEEKLY_AGG_VIEW = "weekly_agg_mv";
 
 type QueryMeasureUnit = "all" | "area_group" | "area" | "stadium_group" | "stadium";
 
@@ -79,16 +80,21 @@ export async function getLatestWeek() {
   return entries[0]?.week ?? null;
 }
 
-export async function getMetricDictionary() {
+export async function getMetricDictionary(timings?: { queryMs?: number; processMs?: number }) {
+  const queryStart = Date.now();
   const { data, error } = await schemaClient
     .from(tableName(METRIC_TABLE))
     .select("metric,korean_name,description")
     .in("metric", METRIC_IDS as unknown as string[]);
+  if (timings) timings.queryMs = Date.now() - queryStart;
 
   if (error) throw new Error(error.message);
 
+  const processStart = Date.now();
   const rows = (data ?? []) as { metric: string; korean_name: string; description: string | null }[];
-  return METRIC_IDS.map((metric) => rows.find((row) => row.metric === metric)).filter(Boolean);
+  const result = METRIC_IDS.map((metric) => rows.find((row) => row.metric === metric)).filter(Boolean);
+  if (timings) timings.processMs = Date.now() - processStart;
+  return result;
 }
 
 export async function getFilterOptions(measureUnit: QueryMeasureUnit) {
@@ -121,103 +127,103 @@ type HeatmapParams = {
   metrics?: string[];
 };
 
-export async function getHeatmap({ measureUnit, filterValue, weeks, metrics }: HeatmapParams) {
+export async function getHeatmap(
+  { measureUnit, filterValue, weeks, metrics }: HeatmapParams,
+  timings?: { queryMs?: number; processMs?: number }
+) {
   const weekIndex = new Map(weeks.map((week, index) => [week, index]));
   const metricIds = (metrics && metrics.length > 0 ? metrics : [...METRIC_IDS]).filter(
     (metric) => METRIC_IDS.includes(metric as (typeof METRIC_IDS)[number])
   );
-  const columns = [
-    "week",
-    "dimension_type",
-    "area_group",
-    "area",
-    "stadium_group",
-    "stadium",
-    ...metricIds
-  ];
-
-  let query = applyBaseFilters(
-    schemaClient.from(tableName(BASE_TABLE)).select(columns.join(","))
-  );
+  let query = schemaClient
+    .from(tableName(WEEKLY_AGG_VIEW))
+    .select("week,measure_unit,filter_value,metric_id,value");
 
   if (weeks.length > 0) {
     query = query.in("week", weeks);
   }
 
   if (measureUnit === "all") {
-    query = query
-      .is("dimension_type", null)
-      .is("area_group", null)
-      .is("area", null)
-      .is("stadium_group", null)
-      .is("stadium", null);
-  } else if (filterValue) {
-    const columnByUnit: Record<Exclude<QueryMeasureUnit, "all">, string> = {
-      area_group: "area_group",
-      area: "area",
-      stadium_group: "stadium_group",
-      stadium: "stadium"
-    };
-    query = query.eq(columnByUnit[measureUnit], filterValue);
+    query = query.eq("measure_unit", "all").eq("filter_value", ALL_LABEL);
   } else {
-    const columnByUnit: Record<Exclude<QueryMeasureUnit, "all">, string> = {
-      area_group: "area_group",
-      area: "area",
-      stadium_group: "stadium_group",
-      stadium: "stadium"
-    };
-    query = query.not(columnByUnit[measureUnit], "is", null);
+    query = query.eq("measure_unit", measureUnit);
+    if (filterValue) {
+      query = query.eq("filter_value", filterValue);
+    } else {
+      query = query.not("filter_value", "is", null);
+    }
   }
 
+  if (metricIds.length > 0) {
+    query = query.in("metric_id", metricIds);
+  }
+
+  const queryStart = Date.now();
   const { data, error } = await query;
+  if (timings) timings.queryMs = Date.now() - queryStart;
   if (error) throw new Error(error.message);
 
-  const rows = (data ?? []).filter((row: any) => {
-    const typed = row as Record<string, string | null>;
-    if (measureUnit === "all") {
-      return (
-        isBlank(typed.area_group) &&
-        isBlank(typed.area) &&
-        isBlank(typed.stadium_group) &&
-        isBlank(typed.stadium)
-      );
-    }
-    const columnByUnit: Record<Exclude<QueryMeasureUnit, "all">, string> = {
-      area_group: "area_group",
-      area: "area",
-      stadium_group: "stadium_group",
-      stadium: "stadium"
-    };
-    return !isBlank(typed[columnByUnit[measureUnit]]);
-  });
+  const processStart = Date.now();
+  const rows = (data ?? []) as {
+    week: string | null;
+    measure_unit: string | null;
+    filter_value: string | null;
+    metric_id: string | null;
+    value: number | string | null;
+  }[];
 
-  const mapped = rows.map((row: any) => {
-    const typed = row as Record<string, string | number | null>;
+  const byEntity = new Map<string, Map<string, Record<string, number>>>();
+  for (const row of rows) {
+    const week = row.week ?? "";
+    if (!week) continue;
     const entity =
       measureUnit === "all"
         ? ALL_LABEL
-        : String(typed[measureUnit] ?? typed[measureUnit as keyof typeof typed] ?? "").trim();
-    const metrics: Record<string, number> = {};
-    metricIds.forEach((metric) => {
-      const value = typed[metric];
-      metrics[metric] = typeof value === "number" ? value : Number(value ?? 0);
-    });
+        : String(row.filter_value ?? "").trim();
+    if (!entity) continue;
+    const metricId = String(row.metric_id ?? "").trim();
+    if (!metricId) continue;
 
-    return {
-      entity,
-      week: String(typed.week ?? ""),
-      metrics
-    };
-  });
+    const value = typeof row.value === "number" ? row.value : Number(row.value ?? 0);
+    if (!byEntity.has(entity)) {
+      byEntity.set(entity, new Map());
+    }
+    const byWeek = byEntity.get(entity)!;
+    if (!byWeek.has(week)) {
+      const initial: Record<string, number> = {};
+      metricIds.forEach((metric) => {
+        initial[metric] = 0;
+      });
+      byWeek.set(week, initial);
+    }
+    const metricsForWeek = byWeek.get(week)!;
+    metricsForWeek[metricId] = value;
+  }
 
-  return mapped.sort((a: any, b: any) => {
+  const mapped: { entity: string; week: string; metrics: Record<string, number> }[] = [];
+  for (const [entity, byWeek] of byEntity.entries()) {
+    for (const week of weeks) {
+      if (!byWeek.has(week)) {
+        const emptyMetrics: Record<string, number> = {};
+        metricIds.forEach((metric) => {
+          emptyMetrics[metric] = 0;
+        });
+        mapped.push({ entity, week, metrics: emptyMetrics });
+      } else {
+        mapped.push({ entity, week, metrics: byWeek.get(week)! });
+      }
+    }
+  }
+
+  const sorted = mapped.sort((a, b) => {
     if (a.entity !== b.entity) {
       return a.entity.localeCompare(b.entity);
     }
     return (weekIndex.get(a.week) ?? 0) - (weekIndex.get(b.week) ?? 0);
   });
+  if (timings) timings.processMs = Date.now() - processStart;
+  return sorted;
 }
 
 export const METRIC_ID_LIST = METRIC_IDS;
 export const ALL_ENTITY_LABEL = ALL_LABEL;
-
