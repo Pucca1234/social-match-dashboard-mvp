@@ -21,14 +21,15 @@ const unitLabel: Record<MeasurementUnit, string> = {
   court: "면"
 };
 
-const metricFormats: Record<string, Metric["format"]> = {
-  total_match_cnt: "number",
-  setting_match_cnt: "number",
-  progress_match_cnt: "number",
-  progress_match_rate: "percent",
-  match_open_rate: "percent",
-  match_loss_rate: "percent"
-};
+const metricFormats: Record<string, Metric["format"]> = {};
+const preferredDefaultMetricIds = [
+  "total_match_cnt",
+  "setting_match_cnt",
+  "progress_match_cnt",
+  "progress_match_rate",
+  "match_open_rate",
+  "match_loss_rate"
+];
 
 const fallbackMetrics: Metric[] = [
   {
@@ -128,7 +129,14 @@ const fetchJsonWithTimeout = async <T,>(
   }
 };
 
-const getMetricFormat = (metricId: string) => metricFormats[metricId] ?? "number";
+const getMetricFormat = (metricId: string) =>
+  metricFormats[metricId] ?? (metricId.endsWith("_rate") ? "percent" : "number");
+
+const pickDefaultMetricIds = (metricIds: string[]) => {
+  const preferred = preferredDefaultMetricIds.filter((id) => metricIds.includes(id));
+  if (preferred.length > 0) return preferred;
+  return metricIds.slice(0, Math.min(metricIds.length, 6));
+};
 
 const buildContext = (
   weeks: string[],
@@ -249,7 +257,7 @@ export default function Home() {
           format: getMetricFormat(row.metric)
         }));
         setMetrics(mappedMetrics);
-        const defaultIds = mappedMetrics.map((metric) => metric.id);
+        const defaultIds = pickDefaultMetricIds(mappedMetrics.map((metric) => metric.id));
         setSelectedMetricIds(defaultIds);
       } catch (error) {
         if (!canceled) {
@@ -277,7 +285,7 @@ export default function Home() {
   useEffect(() => {
     if (!metrics.length) return;
     if (!selectedMetricIds.length) {
-      setSelectedMetricIds(metrics.map((metric) => metric.id));
+      setSelectedMetricIds(pickDefaultMetricIds(metrics.map((metric) => metric.id)));
     }
   }, [metrics, selectedMetricIds]);
 
@@ -396,7 +404,7 @@ export default function Home() {
         return;
       }
 
-      const metricIdsForQuery = metrics.map((metric) => metric.id);
+      const metricIdsForQuery = selectedMetricIds.slice();
 
       setWeeks(nextWeeks);
       setAvailableMetricIds(metricIdsForQuery);
