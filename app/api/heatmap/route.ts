@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { unstable_cache } from "next/cache";
 import { randomUUID } from "crypto";
-import { getHeatmap, METRIC_ID_LIST } from "../../lib/dataQueries";
+import { getHeatmap, getSupportedMetricIds } from "../../lib/dataQueries";
 
 const allowedUnits = ["all", "area_group", "area", "stadium_group", "stadium"] as const;
 const MAX_WEEKS = 104;
@@ -105,12 +105,12 @@ export async function POST(request: Request) {
     return badRequest("metrics is required as a non-empty string array");
   }
 
-  const metricIds =
-    metrics.filter((metric) => METRIC_ID_LIST.includes(metric as (typeof METRIC_ID_LIST)[number]));
-
-  if (metricIds.length === 0) {
-    return badRequest("metrics did not include any supported metric IDs");
-  }
+  const supportedMetricIds = await getSupportedMetricIds();
+  const supportedSet = new Set(supportedMetricIds);
+  const metricIds = Array.from(
+    new Set(metrics.map((metric) => String(metric).trim()).filter((metric) => supportedSet.has(metric)))
+  );
+  if (metricIds.length === 0) return badRequest("metrics did not include any supported metric IDs");
 
   const primaryMetricFinal = primaryMetricId ?? metricIds[0];
 

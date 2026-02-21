@@ -7,7 +7,12 @@
     "build": "next build",
     "start": "next start",
     "prebuild": "node scripts/check-utf8.mjs",
-    "predev": "node scripts/check-utf8.mjs"
+    "predev": "node scripts/check-utf8.mjs",
+    "sb:doctor": "powershell -ExecutionPolicy Bypass -File scripts/supabase/doctor.ps1",
+    "sb:bootstrap": "powershell -ExecutionPolicy Bypass -File scripts/supabase/bootstrap.ps1",
+    "sb:link": "powershell -ExecutionPolicy Bypass -File scripts/supabase/link.ps1",
+    "sb:push": "powershell -ExecutionPolicy Bypass -File scripts/supabase/push.ps1",
+    "data:validate-mv": "node scripts/validate-weekly-agg-mv.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.90.1",
