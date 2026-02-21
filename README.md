@@ -1,79 +1,117 @@
-﻿## 📊 Social Match Analytics Dashboard (MVP)
+## Kevin Dashboard (MVP)
 
-Supabase(BigQuery 연결)를 기반으로 한  
-소셜 매치 데이터 이상 탐지/분석용 MVP 대시보드입니다.
-
----
-
-## ✅ 현재 구현된 기능 (2026-01 기준)
-
-### 1. 데이터 소스
-- Supabase + BigQuery 연동
-- schema: `bigquery`
-- 주요 테이블:
-  - `data_mart_1_social_match`
-  - `metric_store_native`
-
-### 2. API 엔드포인트
-- `GET /api/weeks`
-  - 주 단위(`week`) 라벨 전체 목록 반환
-- `GET /api/metrics`
-  - 지표 사전 (metric id / 한글명 / 설명)
-- `POST /api/heatmap`
-  - 측정단위 / 필터 / 주 목록 기준 히트맵 데이터 반환
-
-### 2-1. 주차 조회 개선 (2026-02)
-- `/api/weeks`는 `bigquery.weeks_view`를 조회
-- VIEW에서 KST 기준 과거 주차만 필터링 + 정렬
-- week 문자열 파싱을 Node에서 제거하여 환경 차이 이슈 방지
-
-### 3. UI (단일 페이지)
-- 상단 가로형 조회 옵션 바 (좌측 패널 제거)
-- 주 단위 데이터가 **좌: 최신 → 우: 과거** 순서로 펼쳐지는 히트맵 테이블
-- 측정단위 드릴다운 구조
-  - 전체 → Area group → Area → Stadium group → Stadium
-- 스파크라인/증감/히트맵 기반 시계열 요약
-- 우측 하단 **AI 분석 리포트** 플로팅 버튼 + 모달(채널톡 스타일)
-
-### 4. 현재 확인된 상태
-- Supabase 실데이터 정상 조회 확인
-- `/api/weeks`, `/api/metrics`, `/api/heatmap` 정상 응답
-- Heatmap/스파크라인 렌더링 정상
-- 최근 N주(8/12/24) 조회는 오늘 기준으로 필터링됨
+Supabase(BigQuery schema) 데이터를 기반으로 주간 소셜매치 지표를 조회/비교/해석하는 단일 페이지 대시보드입니다.
 
 ---
 
-## 🔧 로컬 실행 방법
-
-```bash
-npm install
-npm run dev
-```
-
-## ? 오늘 작업 (2026-02-18)
-
-이번 작업은 heatmap 병목을 해소하고, 운영 안정성을 높이는 데 집중했습니다.  
-아래는 변경의 이유/내용/방식 요약입니다.
-
-### 1) 왜
-- `/api/heatmap`의 DB 쿼리가 3초 수준으로 느려 실사용에 병목이 발생했습니다.
-- 캐시/계측 로그만으로는 근본적인 쿼리 병목을 해소하기 어려웠습니다.
-
-### 2) 무엇을
-- heatmap 조회를 **materialized view(weekly_agg_mv)** 기반으로 전환
-- **cnt 계열 MAX / rate 계열 AVG** 집계 규칙으로 과대 집계 제거
-- MV 인덱스/unique index를 통해 **concurrently refresh 가능**하게 구성
-- `/api/heatmap`, `/api/metrics` 성능 로그에 캐시 히트 여부를 명확히 표시
-- `PERF_OPTIMIZATION.md`에 정확도 검증/운영/SQL 절차 정리
-
-### 3) 어떻게
-- MV에서 `week, measure_unit, filter_value, metric_id` 유일 그레인으로 집계
-- MV 조회용 인덱스 구성 → `measure_unit/weight/metric_id` 기준 최적화
-- 캐시 히트 시 `queryMs/processMs`는 null로 기록해 혼동 제거
-
-### 4) Supabase 연동 주의사항
-- `.env.local`에 아래 키를 설정해야 합니다. **민감값은 저장소에 커밋 금지**
-  - `SUPABASE_URL`
-  - `SUPABASE_SERVICE_ROLE_KEY`
+## 1. 프로젝트 목적과 배경
+- 목적:
+  - 운영/분석 담당자가 주간 지표를 빠르게 비교하고 이상 구간을 확인
+  - 측정단위(전체/지역그룹/지역/구장그룹/구장) 단위로 추이를 읽고 의사결정 지원
+- 배경:
+  - 원천 데이터는 BigQuery 성격의 스키마를 Supabase(Postgres)로 적재해 사용
+  - 초기에는 heatmap API가 원천 테이블 직접 조회로 느렸고, 중복 그레인으로 cnt 과대집계 이슈가 있었음
+  - 현재는 MV + 인덱스 + 캐시 + 집계 규칙 정리로 성능/정확도 안정화 완료
 
 ---
+
+## 2. 기술 스택
+- Frontend/Server:
+  - Next.js 14 (App Router), TypeScript, React
+- Data:
+  - Supabase (schema: `bigquery`)
+- 주요 API:
+  - `GET /api/metrics`
+  - `GET /api/weeks?n=8|12|24`
+  - `GET /api/filter-options?measureUnit=...`
+  - `POST /api/heatmap`
+  - `POST /api/ai/summary`
+  - `POST /api/ai/chat`
+
+---
+
+## 3. 데이터 연결 구조
+- 원천(읽기 전용):
+  - `bigquery.data_mart_1_social_match`
+  - `bigquery.metric_store_native`
+- 보조 View:
+  - `bigquery.weeks_view`
+    - `week` 문자열에서 `week_start_date` 계산
+    - KST 기준 미래 주차 제외
+- 집계 MV:
+  - `bigquery.weekly_agg_mv`
+    - heatmap 조회용
+    - 그레인: `(week, measure_unit, filter_value, metric_id)` 유일
+    - 집계 규칙:
+      - cnt 계열: `MAX`
+      - rate 계열(`progress_match_rate`, `match_open_rate`, `match_loss_rate`): `AVG`
+
+---
+
+## 4. 현재 동작 방향(핵심 결정사항)
+- 기간:
+  - week only
+  - 최근 8/12/24주는 `weeks_view` 기준으로 조회
+- 전체(all) 정의:
+  - `all` 값은 최종적으로 `area_group` 합과 정합하도록 검증됨
+- heatmap 응답:
+  - 응답 shape는 유지
+  - 내부적으로 MV 조회 결과를 프론트가 쓰는 형태로 매핑
+- 성능/운영:
+  - `/api/weeks` 강캐시
+  - `/api/metrics`, `/api/heatmap` TTL 캐시
+  - request_id 기반 perf 로그(query/process/total)
+
+---
+
+## 5. 실행 방법 (다른 컴퓨터 온보딩용)
+1. 저장소 clone
+2. 의존성 설치
+   - `npm install`
+3. 환경변수 설정 (`.env.local`)
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+4. 실행
+   - `npm run dev`
+5. 접속
+   - `http://localhost:3000`
+
+참고:
+- `predev`, `prebuild`에서 UTF-8 검사 스크립트가 실행됨
+- 문서/코드 인코딩이 깨지면 빌드 전에 실패하도록 설정됨
+
+---
+
+## 6. 운영 체크리스트
+- 데이터 최신성:
+  - `weeks_view` 최신 주차 확인
+- MV 상태:
+  - `weekly_agg_mv` refresh 여부 확인
+- 성능:
+  - `/api/heatmap` 로그에서 `queryMs` 확인
+  - 캐시 히트 시 `queryMs/processMs`는 null로 기록됨
+- 정확도:
+  - `total_match_cnt`가 비정상 과대인지 주기적으로 샘플 검증
+
+---
+
+## 7. 변경 이력 요약
+- 주차 정확도:
+  - Node 문자열 파싱 제거, `weeks_view` 중심으로 정렬/필터
+- 성능:
+  - heatmap 원천 테이블 직조회 -> `weekly_agg_mv` 전환
+  - MV 인덱스/unique index 구성
+  - API 캐시 도입
+- 정확도:
+  - 원천 그레인 중복으로 인한 cnt 과대집계 이슈 해결
+  - 집계 규칙 `cnt=MAX`, `rate=AVG` 확정
+- 안정성:
+  - request_id/perf 로그 체계화
+  - UTF-8 검사 자동화 강화
+
+---
+
+## 8. 관련 문서
+- 상세 요구/정책: `PRD.md`
+- 성능/SQL 절차: `PERF_OPTIMIZATION.md`
+
