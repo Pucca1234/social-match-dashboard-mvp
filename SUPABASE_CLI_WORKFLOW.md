@@ -113,3 +113,23 @@ Behavior:
 - Runs automatically on every `pull_request`
 - Runs `npm run data:validate-mv`
 - Fails fast if required secrets are missing
+
+## 9) One-command PR preparation
+
+Run build + data validation + commit:
+
+```powershell
+npm run release:prepare -- -CommitMessage "chore: update dashboard data pipeline"
+```
+
+Run everything above + push:
+
+```powershell
+npm run release:prepare -- -CommitMessage "chore: update dashboard data pipeline" -Push
+```
+
+Optional auto PR creation (requires `gh` CLI):
+
+```powershell
+npm run release:prepare -- -CommitMessage "chore: update dashboard data pipeline" -Push -CreatePr -BaseBranch main
+```
