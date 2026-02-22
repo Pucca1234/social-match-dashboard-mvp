@@ -11,7 +11,9 @@ const fetchMetrics = async () => {
   return { metrics, timings, cachedAt: Date.now() };
 };
 
-const getMetricsCached = unstable_cache(fetchMetrics, ["api-metrics"], { revalidate: METRICS_CACHE_TTL });
+const getMetricsCached = unstable_cache(fetchMetrics, ["api-metrics-v2-with-query"], {
+  revalidate: METRICS_CACHE_TTL
+});
 
 export async function GET() {
   const requestId = randomUUID();

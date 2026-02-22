@@ -86,6 +86,7 @@ type MetricRow = {
   metric: string;
   korean_name: string;
   description: string | null;
+  query: string | null;
 };
 
 type HeatmapRow = {
@@ -179,6 +180,9 @@ export default function Home() {
 
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [selectedMetricIds, setSelectedMetricIds] = useState<string[]>([]);
+  const [metricDraftIds, setMetricDraftIds] = useState<string[]>([]);
+  const [isMetricPickerOpen, setIsMetricPickerOpen] = useState(false);
+  const [copiedMetricId, setCopiedMetricId] = useState<string | null>(null);
 
   const [weeks, setWeeks] = useState<string[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
@@ -254,6 +258,7 @@ export default function Home() {
           id: row.metric,
           name: row.korean_name || row.metric,
           description: row.description || "",
+          query: row.query || "",
           format: getMetricFormat(row.metric)
         }));
         setMetrics(mappedMetrics);
@@ -481,6 +486,44 @@ export default function Home() {
     setPeriodRangeValue(value);
   };
 
+  const openMetricPicker = () => {
+    setMetricDraftIds(selectedMetricIds.slice());
+    setIsMetricPickerOpen(true);
+  };
+
+  const toggleMetricDraft = (metricId: string) => {
+    setMetricDraftIds((prev) =>
+      prev.includes(metricId) ? prev.filter((id) => id !== metricId) : [...prev, metricId]
+    );
+  };
+
+  const resetMetricDraft = () => {
+    setMetricDraftIds([]);
+  };
+
+  const applyMetricDraft = () => {
+    if (metricDraftIds.length === 0) return;
+    setSelectedMetricIds(metricDraftIds.slice());
+    setIsMetricPickerOpen(false);
+  };
+
+  const copyMetricQuery = async (metric: Metric) => {
+    const text = (metric.query || "").trim();
+    if (!text) {
+      pushError("복사할 쿼리가 없습니다.", metric.name);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedMetricId(metric.id);
+      setTimeout(() => {
+        setCopiedMetricId((prev) => (prev === metric.id ? null : prev));
+      }, 1500);
+    } catch (error) {
+      pushError("쿼리 복사 실패", (error as Error).message);
+    }
+  };
+
   const handleChatSend = async () => {
     const message = chatInput.trim();
     if (!message || isChatLoading) return;
@@ -532,9 +575,12 @@ export default function Home() {
     <main className="app-shell">
       <header className="app-header">
         <div className="brand">
-          <img className="brand-icon" src="/kevin-avatar.png" alt="Kevin" />
           <div>
-            <h1>Kevin</h1>
+            <h1>
+              <a className="brand-link" href="/">
+                KEVIN
+              </a>
+            </h1>
             <p>지표 중심 분석을 위한 스마트 대시보드</p>
           </div>
         </div>
@@ -555,9 +601,8 @@ export default function Home() {
             filterOptions={filterOptions}
             filterValue={filterValue}
             onFilterChange={handleFilterChange}
-            metrics={metrics}
-            selectedMetricIds={selectedMetricIds}
-            onSelectedMetricIdsChange={setSelectedMetricIds}
+            selectedMetrics={selectedMetrics}
+            onOpenMetricPicker={openMetricPicker}
             onSearch={handleSearch}
             isSearchDisabled={isSearchDisabled}
           />
@@ -612,6 +657,64 @@ export default function Home() {
         >
           AI 분석 리포트
         </button>
+      )}
+
+      {isMetricPickerOpen && (
+        <div className="metric-picker-overlay" onClick={() => setIsMetricPickerOpen(false)}>
+          <aside className="metric-picker-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="metric-picker-header">
+              <div className="card-title">지표 선택</div>
+              <button
+                type="button"
+                className="metric-picker-close"
+                onClick={() => setIsMetricPickerOpen(false)}
+              >
+                닫기
+              </button>
+            </div>
+            <div className="metric-picker-body">
+              {metrics.map((metric) => {
+                const isSelected = metricDraftIds.includes(metric.id);
+                return (
+                  <button
+                    key={metric.id}
+                    type="button"
+                    className={`metric-pick-item ${isSelected ? "is-selected" : ""}`}
+                    onClick={() => toggleMetricDraft(metric.id)}
+                    aria-pressed={isSelected}
+                  >
+                    <div className="metric-pick-title">{metric.name}</div>
+                    <button
+                      type="button"
+                      className="metric-copy-btn"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void copyMetricQuery(metric);
+                      }}
+                    >
+                      {copiedMetricId === metric.id ? "복사됨" : "쿼리 복사"}
+                    </button>
+                    <div className="metric-pick-id">{metric.id}</div>
+                    <div className="metric-pick-desc">{metric.description || "설명 없음"}</div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="metric-picker-footer">
+              <button type="button" className="btn-ghost" onClick={resetMetricDraft}>
+                선택 초기화
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={applyMetricDraft}
+                disabled={metricDraftIds.length === 0}
+              >
+                선택완료
+              </button>
+            </div>
+          </aside>
+        </div>
       )}
 
       {isReportOpen && (

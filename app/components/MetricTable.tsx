@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import type { CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Metric } from "../types";
 import { formatValue } from "../lib/format";
 import Sparkline from "./Sparkline";
@@ -50,26 +50,93 @@ export default function MetricTable({
   scrollable = true,
   embedded = false
 }: MetricTableProps) {
+  const weekColumnCount = weeks.length;
+  const defaultWidths = useMemo(() => [220, 140, ...Array(weekColumnCount).fill(120)], [weekColumnCount]);
+  const [columnWidths, setColumnWidths] = useState<number[]>(defaultWidths);
+  const resizeIndexRef = useRef<number | null>(null);
+  const startXRef = useRef(0);
+  const startWidthRef = useRef(0);
+
+  useEffect(() => {
+    setColumnWidths(defaultWidths);
+  }, [defaultWidths]);
+
+  const startResize = (index: number, clientX: number) => {
+    resizeIndexRef.current = index;
+    startXRef.current = clientX;
+    startWidthRef.current = columnWidths[index] ?? 120;
+  };
+
+  useEffect(() => {
+    const handleMove = (event: MouseEvent) => {
+      const index = resizeIndexRef.current;
+      if (index === null) return;
+      const delta = event.clientX - startXRef.current;
+      const nextWidth = Math.max(72, startWidthRef.current + delta);
+      setColumnWidths((prev) => prev.map((width, widthIndex) => (widthIndex === index ? nextWidth : width)));
+    };
+    const handleUp = () => {
+      resizeIndexRef.current = null;
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, []);
+
+  const gridTemplateColumns = useMemo(
+    () => columnWidths.map((width) => `${Math.round(width)}px`).join(" "),
+    [columnWidths]
+  );
+
   const grid = (
-    <div className="data-grid" style={{ "--week-count": weeks.length } as CSSProperties}>
+    <div className="data-grid">
       {showHeader && (
-        <div className="data-row data-header">
-          <div className="data-cell data-name">지표</div>
-          <div className="data-cell data-spark">추이</div>
-          {weeks.map((week) => (
-            <div key={week} className="data-cell data-week">
+        <div className="data-row data-header" style={{ gridTemplateColumns } as CSSProperties}>
+          <div className="data-cell data-name is-resizable">
+            지표
+            <button
+              type="button"
+              className="col-resizer"
+              aria-label="Resize 지표 column"
+              onMouseDown={(event) => startResize(0, event.clientX)}
+            />
+          </div>
+          <div className="data-cell data-spark is-resizable">
+            추이
+            <button
+              type="button"
+              className="col-resizer"
+              aria-label="Resize 추이 column"
+              onMouseDown={(event) => startResize(1, event.clientX)}
+            />
+          </div>
+          {weeks.map((week, weekIndex) => (
+            <div key={week} className="data-cell data-week is-resizable">
               {week}
+              <button
+                type="button"
+                className="col-resizer"
+                aria-label={`Resize ${week} column`}
+                onMouseDown={(event) => startResize(2 + weekIndex, event.clientX)}
+              />
             </div>
           ))}
         </div>
       )}
       {metrics.map((metric) => {
         const values = series[metric.id] ?? Array(weeks.length).fill(0);
-          return (
-            <div key={metric.id} className={`data-row ${metric.id === primaryMetricId ? "is-primary" : ""}`}>
-              <div className="data-cell data-name">
-                <span className="name-title">{metric.name}</span>
-              </div>
+        return (
+          <div
+            key={metric.id}
+            className={`data-row ${metric.id === primaryMetricId ? "is-primary" : ""}`}
+            style={{ gridTemplateColumns } as CSSProperties}
+          >
+            <div className="data-cell data-name">
+              <span className="name-title">{metric.name}</span>
+            </div>
             <div className="data-cell data-spark">
               <Sparkline values={values} labels={weeks} formatValue={(value) => formatValue(value, metric)} />
             </div>
@@ -106,11 +173,7 @@ export default function MetricTable({
   return (
     <div className={wrapperClass}>
       {title && <div className="card-title">{title}</div>}
-      {scrollable ? (
-        <div className="table-scroll">{grid}</div>
-      ) : (
-        grid
-      )}
+      {scrollable ? <div className="table-scroll">{grid}</div> : grid}
     </div>
   );
 }

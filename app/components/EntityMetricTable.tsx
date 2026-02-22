@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import type { CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Entity, Metric } from "../types";
 import Sparkline from "./Sparkline";
 import { formatValue } from "../lib/format";
@@ -33,18 +33,89 @@ const getHeatColor = (values: number[], value: number) => {
 };
 
 export default function EntityMetricTable({ weeks, entities, metrics, seriesByEntity }: EntityMetricTableProps) {
+  const weekColumnCount = weeks.length;
+  const defaultWidths = useMemo(() => [180, 120, 120, ...Array(weekColumnCount).fill(120)], [weekColumnCount]);
+  const [columnWidths, setColumnWidths] = useState<number[]>(defaultWidths);
+  const resizeIndexRef = useRef<number | null>(null);
+  const startXRef = useRef(0);
+  const startWidthRef = useRef(0);
+
+  useEffect(() => {
+    setColumnWidths(defaultWidths);
+  }, [defaultWidths]);
+
+  const startResize = (index: number, clientX: number) => {
+    resizeIndexRef.current = index;
+    startXRef.current = clientX;
+    startWidthRef.current = columnWidths[index] ?? 120;
+  };
+
+  useEffect(() => {
+    const handleMove = (event: MouseEvent) => {
+      const index = resizeIndexRef.current;
+      if (index === null) return;
+      const delta = event.clientX - startXRef.current;
+      const nextWidth = Math.max(72, startWidthRef.current + delta);
+      setColumnWidths((prev) => prev.map((width, widthIndex) => (widthIndex === index ? nextWidth : width)));
+    };
+    const handleUp = () => {
+      resizeIndexRef.current = null;
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, []);
+
+  const gridTemplateColumns = useMemo(
+    () => columnWidths.map((width) => `${Math.round(width)}px`).join(" "),
+    [columnWidths]
+  );
+
   return (
     <div className="card table-card">
       <div className="card-title">엔티티별 지표 추이</div>
       <div className="table-scroll">
-        <div className="data-grid entity-grid" style={{ "--week-count": weeks.length } as CSSProperties}>
-          <div className="data-row data-header">
-            <div className="data-cell data-entity">엔티티</div>
-            <div className="data-cell data-metric">지표명</div>
-            <div className="data-cell data-spark">추이</div>
-            {weeks.map((week) => (
-              <div key={week} className="data-cell data-week">
+        <div className="data-grid entity-grid">
+          <div className="data-row data-header" style={{ gridTemplateColumns } as CSSProperties}>
+            <div className="data-cell data-entity is-resizable">
+              엔티티
+              <button
+                type="button"
+                className="col-resizer"
+                aria-label="Resize 엔티티 column"
+                onMouseDown={(event) => startResize(0, event.clientX)}
+              />
+            </div>
+            <div className="data-cell data-metric is-resizable">
+              지표명
+              <button
+                type="button"
+                className="col-resizer"
+                aria-label="Resize 지표명 column"
+                onMouseDown={(event) => startResize(1, event.clientX)}
+              />
+            </div>
+            <div className="data-cell data-spark is-resizable">
+              추이
+              <button
+                type="button"
+                className="col-resizer"
+                aria-label="Resize 추이 column"
+                onMouseDown={(event) => startResize(2, event.clientX)}
+              />
+            </div>
+            {weeks.map((week, weekIndex) => (
+              <div key={week} className="data-cell data-week is-resizable">
                 {week}
+                <button
+                  type="button"
+                  className="col-resizer"
+                  aria-label={`Resize ${week} column`}
+                  onMouseDown={(event) => startResize(3 + weekIndex, event.clientX)}
+                />
               </div>
             ))}
           </div>
@@ -54,7 +125,7 @@ export default function EntityMetricTable({ weeks, entities, metrics, seriesByEn
               const values = series[metric.id] ?? Array(weeks.length).fill(0);
               const isFirst = index === 0;
               return (
-                <div key={`${entity.id}-${metric.id}`} className="data-row">
+                <div key={`${entity.id}-${metric.id}`} className="data-row" style={{ gridTemplateColumns } as CSSProperties}>
                   <div className={`data-cell data-entity ${isFirst ? "" : "is-empty"}`}>
                     <span className="name-title">{entity.name}</span>
                   </div>

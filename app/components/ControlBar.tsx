@@ -11,9 +11,8 @@ type ControlBarProps = {
   filterOptions: FilterOption[];
   filterValue: string;
   onFilterChange: (value: string) => void;
-  metrics: Metric[];
-  selectedMetricIds: string[];
-  onSelectedMetricIdsChange: (next: string[]) => void;
+  selectedMetrics: Metric[];
+  onOpenMetricPicker: () => void;
   onSearch: () => void;
   isSearchDisabled?: boolean;
 };
@@ -28,21 +27,11 @@ export default function ControlBar({
   filterOptions,
   filterValue,
   onFilterChange,
-  metrics,
-  selectedMetricIds,
-  onSelectedMetricIdsChange,
+  selectedMetrics,
+  onOpenMetricPicker,
   onSearch,
   isSearchDisabled
 }: ControlBarProps) {
-  const toggleMetric = (metricId: string) => {
-    if (selectedMetricIds.includes(metricId)) {
-      if (selectedMetricIds.length <= 1) return;
-      onSelectedMetricIdsChange(selectedMetricIds.filter((id) => id !== metricId));
-    } else {
-      onSelectedMetricIdsChange([...selectedMetricIds, metricId]);
-    }
-  };
-
   return (
     <div className="sidebar-panel">
       <div className="panel-title">옵션 선택</div>
@@ -88,24 +77,15 @@ export default function ControlBar({
         </label>
         <div className="field metric-field">
           <span className="field-label">지표 선택 (최소 1개)</span>
-          <div className="metric-list">
-            {metrics.map((metric) => {
-              const isSelected = selectedMetricIds.includes(metric.id);
-              return (
-                <button
-                  key={metric.id}
-                  type="button"
-                  className={`metric-item ${isSelected ? "is-selected" : ""}`}
-                  onClick={() => toggleMetric(metric.id)}
-                  aria-pressed={isSelected}
-                >
-                  <div className="metric-text">
-                    <span className="metric-name">{metric.name}</span>
-                    <span className="metric-desc">{metric.description}</span>
-                  </div>
-                </button>
-              );
-            })}
+          <button type="button" className="btn-secondary" onClick={onOpenMetricPicker}>
+            지표 선택
+          </button>
+          <div className="selected-metric-chips">
+            {selectedMetrics.map((metric) => (
+              <span key={metric.id} className="selected-metric-chip" title={metric.description}>
+                {metric.name}
+              </span>
+            ))}
           </div>
         </div>
         <button type="button" className="btn-primary" onClick={onSearch} disabled={isSearchDisabled}>

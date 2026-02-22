@@ -11,7 +11,7 @@ const WEEK_LIMIT_DEFAULT = 104;
 type QueryMeasureUnit = "all" | "area_group" | "area" | "stadium_group" | "stadium";
 
 type WeekEntry = { week: string; startDate: string | null };
-type MetricDictRow = { metric: string; korean_name: string; description: string | null };
+type MetricDictRow = { metric: string; korean_name: string; description: string | null; query: string | null };
 type HeatmapAggRow = {
   week: string | null;
   measure_unit: string | null;
@@ -254,7 +254,7 @@ export async function getSupportedMetricIds(timings?: { queryMs?: number; proces
 export async function getMetricDictionary(timings?: { queryMs?: number; processMs?: number }) {
   const queryStart = Date.now();
   const [metricRowsResult, supportedMetricIds] = await Promise.all([
-    schemaClient.from(tableName(METRIC_TABLE)).select("metric,korean_name,description"),
+    schemaClient.from(tableName(METRIC_TABLE)).select("metric,korean_name,description,query"),
     getSupportedMetricIds()
   ]);
   if (timings) timings.queryMs = Date.now() - queryStart;
