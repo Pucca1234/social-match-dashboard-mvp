@@ -14,6 +14,7 @@ export type Metric = {
   id: string;
   name: string;
   description: string;
+  query?: string;
   format: "number" | "percent";
 };
 

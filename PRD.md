@@ -76,6 +76,20 @@
 - Heatmap 요청은 선택 지표만 조회하도록 변경
 - fallback은 `HEATMAP_ALLOW_BASE_FALLBACK=1`일 때만 허용(기본 OFF)
 
+### 7.4 검색/결과 UI 개선
+- 상단 브랜딩:
+  - 아이콘 제거
+  - `KEVIN` 클릭 시 대시보드 초기 URL(`/`)로 이동
+- 결과 테이블:
+  - 제목행 고정(sticky)
+  - 열 너비 리사이즈(마우스 드래그)
+- 지표 선택:
+  - 기존 리스트 직접 스크롤 방식 -> 사이드 패널 방식
+  - 패널 내 지표 설명 제공
+  - 쿼리 박스 대신 `쿼리 복사` 버튼 제공 (`metric_store_native.query`)
+  - `선택완료` 버튼은 1개 이상 선택 시에만 활성
+  - `선택 초기화` 버튼으로 패널 내 선택 상태 초기화
+
 ## 8. 검증 체계
 ### 8.1 로컬 검증
 - 스크립트: `scripts/validate-weekly-agg-mv.mjs`
@@ -109,7 +123,6 @@
 - 기능:
   - build + data validation + commit
   - 옵션으로 push/PR 생성
-
 ## 10. 비기능 요구사항
 - UTF-8 인코딩 강제(`predev`, `prebuild`)
 - 원천 테이블 스키마 변경 금지
