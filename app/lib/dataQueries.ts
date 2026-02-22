@@ -7,6 +7,7 @@ const BASE_TABLE = "data_mart_1_social_match";
 const METRIC_TABLE = "metric_store_native";
 const WEEKLY_AGG_VIEW = "weekly_agg_mv";
 const WEEK_LIMIT_DEFAULT = 104;
+const POSTGREST_PAGE_SIZE = 1000;
 
 type QueryMeasureUnit = "all" | "area_group" | "area" | "stadium_group" | "stadium";
 
@@ -35,6 +36,25 @@ const applyBaseFilters = (query: any) =>
     .is("yoil_group", null)
     .is("hour", null)
     .is("time", null);
+
+const fetchPagedRows = async <T>(buildQuery: (from: number, to: number) => any) => {
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    const to = from + POSTGREST_PAGE_SIZE - 1;
+    const { data, error } = await buildQuery(from, to);
+    if (error) throw new Error(error.message);
+
+    const page = (data ?? []) as T[];
+    rows.push(...page);
+    if (page.length < POSTGREST_PAGE_SIZE) break;
+
+    from += POSTGREST_PAGE_SIZE;
+  }
+
+  return rows;
+};
 
 const isBlank = (value: unknown) => value === null || value === undefined || String(value).trim() === "";
 const isRateMetric = (metricId: string) => metricId.endsWith("_rate");
@@ -161,22 +181,28 @@ const getHeatmapFromBaseTable = async ({
 }) => {
   const unitColumn = columnByUnit[measureUnit];
   const selectColumns = Array.from(new Set(["week", unitColumn, ...metricIds])).join(",");
-
-  let query = applyBaseFilters(schemaClient.from(tableName(BASE_TABLE)).select(selectColumns));
-  if (weeks.length > 0) {
-    query = query.in("week", weeks);
-  }
-  query = query.not(unitColumn, "is", null);
-  if (filterValue) {
-    query = query.eq(unitColumn, filterValue);
-  }
-
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
+  const data = await fetchPagedRows<Record<string, unknown>>((from, to) => {
+    let query = applyBaseFilters(
+      schemaClient
+        .from(tableName(BASE_TABLE))
+        .select(selectColumns)
+        .order("week", { ascending: true })
+        .order(unitColumn, { ascending: true, nullsFirst: false })
+        .range(from, to)
+    );
+    if (weeks.length > 0) {
+      query = query.in("week", weeks);
+    }
+    query = query.not(unitColumn, "is", null);
+    if (filterValue) {
+      query = query.eq(unitColumn, filterValue);
+    }
+    return query;
+  });
 
   type AggState = { max: number; sum: number; count: number };
   const accumulator = new Map<string, AggState>();
-  for (const row of (data ?? []) as Record<string, unknown>[]) {
+  for (const row of data) {
     const week = String(row.week ?? "").trim();
     const entity = String(row[unitColumn] ?? "").trim();
     if (!week || !entity) continue;
@@ -275,8 +301,15 @@ export async function getFilterOptions(measureUnit: QueryMeasureUnit) {
   if (measureUnit === "all") return [ALL_LABEL];
 
   const column = columnByUnit[measureUnit];
-  const { data, error } = await applyBaseFilters(schemaClient.from(tableName(BASE_TABLE)).select(column));
-  if (error) throw new Error(error.message);
+  const data = await fetchPagedRows<Record<string, string | null>>((from, to) =>
+    applyBaseFilters(
+      schemaClient
+        .from(tableName(BASE_TABLE))
+        .select(column)
+        .order(column, { ascending: true, nullsFirst: false })
+        .range(from, to)
+    )
+  );
 
   const values = (data ?? [])
     .map((row: any) => (row as Record<string, string | null>)[column])
@@ -302,35 +335,38 @@ export async function getHeatmap(
   const metricIds = (requested.length > 0 ? requested : supportedMetricIds).filter((metric) => allowed.has(metric));
   if (metricIds.length === 0) return [];
 
-  let query = schemaClient
-    .from(tableName(WEEKLY_AGG_VIEW))
-    .select("week,measure_unit,filter_value,metric_id,value");
-
-  if (weeks.length > 0) {
-    query = query.in("week", weeks);
-  }
-
-  if (measureUnit === "all") {
-    query = query.eq("measure_unit", "all").eq("filter_value", ALL_LABEL);
-  } else {
-    query = query.eq("measure_unit", measureUnit);
-    if (filterValue) {
-      query = query.eq("filter_value", filterValue);
-    } else {
-      query = query.not("filter_value", "is", null);
-    }
-  }
-
-  if (metricIds.length > 0) {
-    query = query.in("metric_id", metricIds);
-  }
-
   const queryStart = Date.now();
-  const { data, error } = await query;
-  let queryMs = Date.now() - queryStart;
-  if (error) throw new Error(error.message);
+  let rows = await fetchPagedRows<HeatmapAggRow>((from, to) => {
+    let query = schemaClient
+      .from(tableName(WEEKLY_AGG_VIEW))
+      .select("week,measure_unit,filter_value,metric_id,value")
+      .order("week", { ascending: true })
+      .order("filter_value", { ascending: true, nullsFirst: false })
+      .order("metric_id", { ascending: true })
+      .range(from, to);
 
-  let rows = (data ?? []) as HeatmapAggRow[];
+    if (weeks.length > 0) {
+      query = query.in("week", weeks);
+    }
+
+    if (measureUnit === "all") {
+      query = query.eq("measure_unit", "all").eq("filter_value", ALL_LABEL);
+    } else {
+      query = query.eq("measure_unit", measureUnit);
+      if (filterValue) {
+        query = query.eq("filter_value", filterValue);
+      } else {
+        query = query.not("filter_value", "is", null);
+      }
+    }
+
+    if (metricIds.length > 0) {
+      query = query.in("metric_id", metricIds);
+    }
+
+    return query;
+  });
+  let queryMs = Date.now() - queryStart;
   if (allowBaseFallback && measureUnit !== "all" && rows.length === 0) {
     const fallbackStart = Date.now();
     rows = await getHeatmapFromBaseTable({
@@ -350,5 +386,3 @@ export async function getHeatmap(
 }
 
 export const ALL_ENTITY_LABEL = ALL_LABEL;
-
-

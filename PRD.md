@@ -75,6 +75,8 @@
 ### 7.3 조회 방식 개선
 - Heatmap 요청은 선택 지표만 조회하도록 변경
 - fallback은 `HEATMAP_ALLOW_BASE_FALLBACK=1`일 때만 허용(기본 OFF)
+- 대용량 단위(`area`, `stadium_group`, `stadium`)는 PostgREST 응답 제한(1000행) 회피를 위해 페이지네이션(`range`)으로 전체 row를 수집
+- `GET /api/filter-options`도 동일하게 페이지네이션 적용
 
 ### 7.4 검색/결과 UI 개선
 - 상단 브랜딩:
@@ -89,6 +91,20 @@
   - 쿼리 박스 대신 `쿼리 복사` 버튼 제공 (`metric_store_native.query`)
   - `선택완료` 버튼은 1개 이상 선택 시에만 활성
   - `선택 초기화` 버튼으로 패널 내 선택 상태 초기화
+
+### 7.5 2026-02-22 장애 원인 및 조치
+- 현상:
+  - `area/stadium_group/stadium` 최근 주차 조회 시 0 값 과다 노출
+- 원인:
+  - API 조회가 단건 호출로 끝나면서 대용량 row가 1000행으로 절단됨
+  - 절단 이후 프론트 표시에서 일부 지표가 0 중심으로 보이는 왜곡 발생
+- 재현 근거(최근 8주, 주요 6지표):
+  - `area`: `rowsReturned=1000`, `exactCount=4228`
+  - `stadium_group`: `rowsReturned=1000`, `exactCount=15677`
+  - `stadium`: `rowsReturned=1000`, `exactCount=24639`
+- 조치:
+  - `app/lib/dataQueries.ts`에 공통 페이지네이션 유틸 도입
+  - heatmap/fallback/filter 옵션 조회 경로 모두 페이지네이션 적용
 
 ## 8. 검증 체계
 ### 8.1 로컬 검증
