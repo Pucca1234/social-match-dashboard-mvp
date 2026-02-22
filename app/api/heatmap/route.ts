@@ -6,6 +6,7 @@ import { getHeatmap, getSupportedMetricIds } from "../../lib/dataQueries";
 const allowedUnits = ["all", "area_group", "area", "stadium_group", "stadium"] as const;
 const MAX_WEEKS = 104;
 const HEATMAP_CACHE_TTL = 180;
+const SUPPORTED_METRIC_IDS_CACHE_TTL = 3600;
 
 type HeatmapRequestBody = {
   measureUnit: (typeof allowedUnits)[number];
@@ -26,6 +27,12 @@ const buildHeatmapCacheKey = (params: {
   const metricsKey = params.metrics.join("|");
   return `heatmap:${params.measureUnit}:${filterKey}:${weeksKey}:${metricsKey}`;
 };
+
+const getSupportedMetricIdsCached = unstable_cache(
+  async () => getSupportedMetricIds(),
+  ["api-heatmap-supported-metric-ids-v1"],
+  { revalidate: SUPPORTED_METRIC_IDS_CACHE_TTL }
+);
 
 export async function POST(request: Request) {
   const requestId = randomUUID();
@@ -105,7 +112,7 @@ export async function POST(request: Request) {
     return badRequest("metrics is required as a non-empty string array");
   }
 
-  const supportedMetricIds = await getSupportedMetricIds();
+  const supportedMetricIds = await getSupportedMetricIdsCached();
   const supportedSet = new Set(supportedMetricIds);
   const metricIds = Array.from(
     new Set(metrics.map((metric) => String(metric).trim()).filter((metric) => supportedSet.has(metric)))

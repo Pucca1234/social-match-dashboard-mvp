@@ -40,6 +40,9 @@
   - Heatmap API 요청 시 선택 지표만 조회
   - `area/stadium_group/stadium` 대용량 조회 시 PostgREST 1000행 제한으로 누락되던 문제를 페이지네이션(`range`) 조회로 개선
   - 필터 옵션 조회(`GET /api/filter-options`)도 페이지네이션 적용해 옵션 누락 방지
+  - 필터 옵션 조회를 원천 테이블 스캔이 아닌 `weekly_agg_mv` 기반으로 전환해 로딩 시간 개선
+  - `GET /api/filter-options` 응답에 TTL 캐시(600초) 적용
+  - `/api/heatmap`의 지원 지표 목록 조회(`getSupportedMetricIds`)에 TTL 캐시(3600초) 적용
 - 운영 안정화:
   - `HEATMAP_ALLOW_BASE_FALLBACK=1`일 때만 원천 fallback 허용(기본 OFF)
 - 자동 검증:
@@ -92,6 +95,7 @@ npm run data:validate-mv
 
 ## Supabase 배포 워크플로
 - 마이그레이션: `supabase/migrations/202602210001_weekly_agg_mv_v2.sql`
+- 마이그레이션: `supabase/migrations/202602220001_weekly_agg_mv_filter_options_idx.sql`
 - 빠른 실행 가이드: `SUPABASE_CLI_WORKFLOW.md`
 
 ## 참고 문서
