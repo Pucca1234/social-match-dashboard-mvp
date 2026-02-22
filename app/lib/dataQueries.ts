@@ -300,20 +300,20 @@ export async function getMetricDictionary(timings?: { queryMs?: number; processM
 export async function getFilterOptions(measureUnit: QueryMeasureUnit) {
   if (measureUnit === "all") return [ALL_LABEL];
 
-  const column = columnByUnit[measureUnit];
-  const data = await fetchPagedRows<Record<string, string | null>>((from, to) =>
-    applyBaseFilters(
-      schemaClient
-        .from(tableName(BASE_TABLE))
-        .select(column)
-        .order(column, { ascending: true, nullsFirst: false })
-        .range(from, to)
-    )
+  const data = await fetchPagedRows<{ filter_value: string | null }>((from, to) =>
+    schemaClient
+      .from(tableName(WEEKLY_AGG_VIEW))
+      .select("filter_value")
+      .eq("measure_unit", measureUnit)
+      .eq("metric_id", "total_match_cnt")
+      .not("filter_value", "is", null)
+      .order("filter_value", { ascending: true, nullsFirst: false })
+      .range(from, to)
   );
 
   const values = (data ?? [])
-    .map((row: any) => (row as Record<string, string | null>)[column])
-    .filter((value: unknown) => !isBlank(value)) as string[];
+    .map((row) => row.filter_value)
+    .filter((value): value is string => !isBlank(value));
 
   return Array.from(new Set(values)).sort();
 }

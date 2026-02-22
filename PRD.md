@@ -77,6 +77,9 @@
 - fallback은 `HEATMAP_ALLOW_BASE_FALLBACK=1`일 때만 허용(기본 OFF)
 - 대용량 단위(`area`, `stadium_group`, `stadium`)는 PostgREST 응답 제한(1000행) 회피를 위해 페이지네이션(`range`)으로 전체 row를 수집
 - `GET /api/filter-options`도 동일하게 페이지네이션 적용
+- `GET /api/filter-options`는 원천(`data_mart_1_social_match`) 스캔 대신 `weekly_agg_mv`(`metric_id=total_match_cnt`) 기준으로 조회
+- `GET /api/filter-options` 응답은 TTL 600초 캐시
+- `/api/heatmap` 내부의 지원 지표 ID 조회는 TTL 3600초 캐시
 
 ### 7.4 검색/결과 UI 개선
 - 상단 브랜딩:
@@ -105,6 +108,16 @@
 - 조치:
   - `app/lib/dataQueries.ts`에 공통 페이지네이션 유틸 도입
   - heatmap/fallback/filter 옵션 조회 경로 모두 페이지네이션 적용
+
+### 7.6 2026-02-22 속도 개선(v4)
+- 배경:
+  - `stadium_group`, `stadium`는 엔티티 수가 많아 필터 옵션 로딩과 조회 준비 단계 지연 발생
+- 개선:
+  - `weekly_agg_mv`에 인덱스 추가:
+    - 마이그레이션: `supabase/migrations/202602220001_weekly_agg_mv_filter_options_idx.sql`
+    - 인덱스: `(measure_unit, metric_id, filter_value)`
+  - 필터 옵션 API를 MV 기반으로 전환하고 TTL 캐시 적용
+  - heatmap API의 지원 지표 목록 조회 캐시 적용
 
 ## 8. 검증 체계
 ### 8.1 로컬 검증
