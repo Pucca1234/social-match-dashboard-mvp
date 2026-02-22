@@ -38,6 +38,8 @@
   - 고정 6개 지표에서 벗어나, `metric_store_native`와 원천 컬럼 교집합 기준의 동적 지표 지원
 - 조회 효율화:
   - Heatmap API 요청 시 선택 지표만 조회
+  - `area/stadium_group/stadium` 대용량 조회 시 PostgREST 1000행 제한으로 누락되던 문제를 페이지네이션(`range`) 조회로 개선
+  - 필터 옵션 조회(`GET /api/filter-options`)도 페이지네이션 적용해 옵션 누락 방지
 - 운영 안정화:
   - `HEATMAP_ALLOW_BASE_FALLBACK=1`일 때만 원천 fallback 허용(기본 OFF)
 - 자동 검증:
@@ -51,6 +53,15 @@
     - 사이드 패널 방식으로 변경
     - 지표 설명 + 쿼리 복사 버튼 제공
     - `선택완료`/`선택 초기화` 동작 및 선택 0건 시 완료 버튼 비활성
+
+## 이슈 진단 메모 (2026-02-22)
+- 증상:
+  - `all`, `area_group`는 정상이나 `area`, `stadium_group`, `stadium`에서 최근값이 0으로 과다 노출
+- 진단 결과:
+  - DB 원천 부족이 아니라, 대용량 단위에서 API 단건 조회가 `rows=1000, exactCount>>1000`으로 잘리는 현상 확인
+  - 예시(최근 8주, 기본 6지표): `area 1000/4228`, `stadium_group 1000/15677`, `stadium 1000/24639`
+- 조치:
+  - `app/lib/dataQueries.ts`의 heatmap/filter/fallback 조회를 모두 페이지네이션으로 변경
 
 ## 실행
 1. 의존성 설치
