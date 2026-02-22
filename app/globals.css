@@ -111,6 +111,7 @@ main {
 .main-panel {
   display: grid;
   gap: 18px;
+  min-width: 0;
 }
 
 .card,
@@ -394,7 +395,7 @@ main {
 }
 
 .table-scroll {
-  overflow-x: visible;
+  overflow-x: auto;
   overflow-y: clip;
   padding-bottom: 6px;
 }
