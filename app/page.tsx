@@ -302,12 +302,14 @@ export default function Home() {
     };
   }, []);
 
+  const hasInitializedMetrics = useRef(false);
   useEffect(() => {
-    if (!metrics.length) return;
+    if (!metrics.length || hasInitializedMetrics.current) return;
     if (!selectedMetricIds.length) {
       setSelectedMetricIds(pickDefaultMetricIds(metrics.map((metric) => metric.id)));
     }
-  }, [metrics, selectedMetricIds]);
+    hasInitializedMetrics.current = true;
+  }, [metrics]);
 
   useEffect(() => {
     let canceled = false;
@@ -848,11 +850,15 @@ export default function Home() {
               {metrics.map((metric) => {
                 const isSelected = metricDraftIds.includes(metric.id);
                 return (
-                  <button
+                  <div
                     key={metric.id}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     className={`metric-pick-item ${isSelected ? "is-selected" : ""}`}
                     onClick={() => toggleMetricDraft(metric.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") toggleMetricDraft(metric.id);
+                    }}
                     aria-pressed={isSelected}
                   >
                     <div className="metric-pick-title">{metric.name}</div>
@@ -868,7 +874,7 @@ export default function Home() {
                     </button>
                     <div className="metric-pick-id">{metric.id}</div>
                     <div className="metric-pick-desc">{metric.description || "설명 없음"}</div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
