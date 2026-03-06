@@ -25,6 +25,7 @@ type ControlBarProps = {
   onDeleteTemplate: (id: string) => void;
   onRenameTemplate: (id: string, name: string) => void;
   onSetDefaultTemplate: (id: string) => void;
+  onResetFilters: () => void;
 };
 
 export default function ControlBar({
@@ -49,7 +50,8 @@ export default function ControlBar({
   onSaveTemplate,
   onDeleteTemplate,
   onRenameTemplate,
-  onSetDefaultTemplate
+  onSetDefaultTemplate,
+  onResetFilters
 }: ControlBarProps) {
   const [isTemplateDropdownOpen, setIsTemplateDropdownOpen] = useState(false);
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
@@ -255,6 +257,9 @@ export default function ControlBar({
             ))}
           </select>
         </label>
+        <button type="button" className="btn-ghost btn-reset" onClick={onResetFilters} title="필터 초기화">
+          초기화
+        </button>
         <div className="search-action-group">
           <button type="button" className="btn-primary search-submit-btn" onClick={onSearch} disabled={isSearchDisabled}>
             조회 및 AI 자동 분석

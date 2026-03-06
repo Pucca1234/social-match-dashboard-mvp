@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createClient } from "@/app/lib/supabase/client";
 import ControlBar from "./components/ControlBar";
 import MetricTable from "./components/MetricTable";
 import EntityMetricTable from "./components/EntityMetricTable";
@@ -215,6 +216,7 @@ export default function Home() {
 
   const [templates, setTemplates] = useState<FilterTemplate[]>([]);
   const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string | null>(null);
 
   const pushError = (message: string, detail?: string) => {
     setErrorLogs((prev) => {
@@ -230,6 +232,13 @@ export default function Home() {
       return next.slice(0, 50);
     });
   };
+
+  useEffect(() => {
+    createClient().auth.getUser().then(({ data }) => {
+      const meta = data.user?.user_metadata;
+      setUserName(meta?.full_name || meta?.name || data.user?.email || null);
+    });
+  }, []);
 
   useEffect(() => {
     const originalError = console.error;
@@ -733,6 +742,17 @@ export default function Home() {
         </div>
         <div className="header-meta">
           <span>데이터 소스: Supabase</span>
+          {userName && <span className="user-name">{userName}</span>}
+          <button
+            className="logout-btn"
+            onClick={async () => {
+              const supabase = createClient();
+              await supabase.auth.signOut();
+              window.location.href = "/login";
+            }}
+          >
+            로그아웃
+          </button>
         </div>
       </header>
 
@@ -760,6 +780,13 @@ export default function Home() {
           onDeleteTemplate={handleDeleteTemplate}
           onRenameTemplate={handleRenameTemplate}
           onSetDefaultTemplate={handleSetDefaultTemplate}
+          onResetFilters={() => {
+            setPeriodRangeValue("recent_8");
+            setMeasurementUnit("all");
+            setFilterValue(ALL_VALUE);
+            setSelectedMetricIds(preferredDefaultMetricIds.filter((id) => metrics.some((m) => m.id === id)));
+            setActiveTemplateId(null);
+          }}
         />
         {isLoadingFilter && <div className="card subtle">필터 로딩 중...</div>}
       </section>
