@@ -42,12 +42,26 @@ jobs:
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
 
+      - name: Resolve DB host IPv4
+        id: resolve_db
+        run: |
+          set -euo pipefail
+          DB_HOST="db.${SUPABASE_PROJECT_REF}.supabase.co"
+          DB_HOSTADDR="$(getent ahostsv4 "${DB_HOST}" | awk '{ print $1; exit }')"
+          if [ -z "${DB_HOSTADDR}" ]; then
+            echo "Could not resolve IPv4 for ${DB_HOST}"
+            echo "If your project is IPv6-only, use Supabase pooler endpoint for CI."
+            exit 1
+          fi
+          echo "db_host=${DB_HOST}" >> "$GITHUB_OUTPUT"
+          echo "db_hostaddr=${DB_HOSTADDR}" >> "$GITHUB_OUTPUT"
+
       - name: Rebuild weekly_agg_mv and indexes
         env:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           psql \
-            "host=db.${SUPABASE_PROJECT_REF}.supabase.co port=5432 dbname=postgres user=postgres sslmode=require" \
+            "host=${{ steps.resolve_db.outputs.db_host }} hostaddr=${{ steps.resolve_db.outputs.db_hostaddr }} port=5432 dbname=postgres user=postgres sslmode=require" \
             -v ON_ERROR_STOP=1 \
             -f supabase/sql/refresh_weekly_agg_mv.sql
 
