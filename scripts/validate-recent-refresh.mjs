@@ -28,27 +28,69 @@ const UNITS = ["all", "area_group", "area", "stadium_group", "stadium"];
 const METRIC_ID = process.env.MV_HEALTHCHECK_METRIC || "total_match_cnt";
 const CHECK_WEEKS = Number.parseInt(process.env.MV_HEALTHCHECK_WEEKS || "3", 10);
 
-const ensureCount = async (week, unit) => {
-  const { count, error } = await supabase
+const formatError = (error) => {
+  if (!error) return { message: "Unknown error" };
+  return {
+    message: error.message ?? "Unknown error",
+    code: error.code ?? null,
+    details: error.details ?? null,
+    hint: error.hint ?? null,
+    name: error.name ?? null
+  };
+};
+
+const executeCountQuery = async ({ week, unit, metricId, queryType }) => {
+  let query = supabase
     .schema("bigquery")
     .from("weekly_agg_mv")
     .select("week", { count: "exact", head: true })
     .eq("week", week)
     .eq("measure_unit", unit);
-  if (error) throw error;
+
+  if (metricId) {
+    query = query.eq("metric_id", metricId);
+  }
+
+  const { count, error } = await query;
+  if (error) {
+    const wrappedError = new Error(`weekly_agg_mv ${queryType} query failed`);
+    wrappedError.context = {
+      queryType,
+      week,
+      unit,
+      metricId: metricId ?? null
+    };
+    wrappedError.supabaseError = formatError(error);
+    throw wrappedError;
+  }
+
   return count ?? 0;
 };
 
-const ensureMetricCount = async (week, unit, metricId) => {
-  const { count, error } = await supabase
-    .schema("bigquery")
-    .from("weekly_agg_mv")
-    .select("week", { count: "exact", head: true })
-    .eq("week", week)
-    .eq("measure_unit", unit)
-    .eq("metric_id", metricId);
-  if (error) throw error;
-  return count ?? 0;
+const ensureCount = async (week, unit) =>
+  executeCountQuery({
+    week,
+    unit,
+    queryType: "row_count"
+  });
+
+const ensureMetricCount = async (week, unit, metricId) =>
+  executeCountQuery({
+    week,
+    unit,
+    metricId,
+    queryType: "metric_count"
+  });
+
+const formatFailure = ({ week, unit, metricId, rowCount, metricCount }) => {
+  const parts = [
+    `week=${week}`,
+    `unit=${unit}`,
+    `rowCount=${rowCount}`,
+    `metricId=${metricId}`,
+    `metricCount=${metricCount}`
+  ];
+  return parts.join(", ");
 };
 
 const main = async () => {
@@ -75,10 +117,10 @@ const main = async () => {
       summary.push({ week, unit, rowCount, metricId: METRIC_ID, metricCount });
 
       if (rowCount <= 0) {
-        failures.push(`No rows in weekly_agg_mv for week=${week}, unit=${unit}`);
+        failures.push(`No rows in weekly_agg_mv: ${formatFailure({ week, unit, metricId: METRIC_ID, rowCount, metricCount })}`);
       }
       if (metricCount <= 0) {
-        failures.push(`No ${METRIC_ID} rows for week=${week}, unit=${unit}`);
+        failures.push(`Missing metric rows: ${formatFailure({ week, unit, metricId: METRIC_ID, rowCount, metricCount })}`);
       }
     }
   }
@@ -103,6 +145,18 @@ const main = async () => {
 };
 
 main().catch((error) => {
-  console.error(error);
+  console.error("MV healthcheck execution failed.");
+  if (error?.context) {
+    console.error("Context:");
+    console.error(JSON.stringify(error.context, null, 2));
+  }
+  if (error?.supabaseError) {
+    console.error("Supabase error:");
+    console.error(JSON.stringify(error.supabaseError, null, 2));
+  } else if (error instanceof Error) {
+    console.error(error.stack ?? error.message);
+  } else {
+    console.error(error);
+  }
   process.exit(1);
 });

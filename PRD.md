@@ -165,15 +165,16 @@
 - 오늘 반영:
   - 주간 자동복구 워크플로(`.github/workflows/weekly-mv-rebuild.yml`) main 반영
   - 재생성 SQL(`supabase/sql/refresh_weekly_agg_mv.sql`) 및 최신 주차 헬스체크(`scripts/validate-recent-refresh.mjs`) 연동
-- 오늘 장애/로그:
+- 오늘 장애/조치:
   - Direct DB 경로는 GitHub Actions IPv4 환경에서 `Network is unreachable`로 실패
-  - `SUPABASE_DB_URI` 기반으로 전환 후 재생성 단계는 통과했으나
-  - `Validate latest weeks after rebuild` 단계에서 에러 메시지 컨텍스트 부족(`{ message: '' }`)
+  - `SUPABASE_DB_URI` 기반으로 전환 후 재생성 단계 정상화
+  - 헬스체크 실패 시 에러 메시지 컨텍스트 부족(`{ message: '' }`) 문제가 있어 스크립트 로그를 보강
+  - `scripts/validate-recent-refresh.mjs`는 실패 시 `week/unit/metric/queryType`와 Supabase error payload(`code/details/hint/message`)를 함께 출력하도록 개선
+  - `Weekly MV Rebuild #8` 수동 재실행 성공, 로컬 최신 3주 기준 `data:validate-recent-refresh` 및 `data:validate-mv`도 통과
 - 다음 작업 TODO:
-  - 헬스체크 스크립트 에러 출력 개선(코드/디테일/힌트/쿼리 컨텍스트)
-  - 최근 3주 x 5개 단위 count 쿼리 수동 재현으로 실패 지점 확정
+  - 배포 UI 기준 최신 주차 조회 결과(`all/area/stadium`) 최종 확인
+  - `actions/checkout@v5`, `actions/setup-node@v5` 반영 후 워크플로 annotation 경고 제거 확인
   - pooler URI 형식/인코딩/sslmode 점검
-  - 헬스체크 실패 기준(존재성/카운트 기준) 정책 확정
 
 ## 8. 운영 도메인 원칙
 - Canonical 운영 도메인은 단일값만 사용:
