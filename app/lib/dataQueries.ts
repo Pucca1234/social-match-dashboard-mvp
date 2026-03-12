@@ -133,6 +133,14 @@ const resolveMetricCategory = (row: MetricDictRow, depth: 2 | 3) => {
   );
 };
 
+const chunkValues = <T,>(values: T[], size: number) => {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+};
+
 const getChildEntityValues = async ({
   measureUnit,
   parentUnit,
@@ -585,27 +593,35 @@ export async function getHeatmap(
     if (childValues.length === 0) {
       rows = [];
     } else {
-      rows = await fetchPagedRows<HeatmapAggRow>((from, to) => {
-        let query = schemaClient
-          .from(tableName(WEEKLY_AGG_VIEW))
-          .select("week,measure_unit,filter_value,metric_id,value")
-          .eq("measure_unit", measureUnit)
-          .in("filter_value", childValues)
-          .order("week", { ascending: true })
-          .order("filter_value", { ascending: true, nullsFirst: false })
-          .order("metric_id", { ascending: true })
-          .range(from, to);
+      const rowsByChunk = await Promise.all(
+        chunkValues(
+          childValues,
+          Math.max(1, Math.floor(800 / Math.max(1, weeks.length * Math.max(metricIds.length, 1))))
+        ).map(async (chunk) => {
+          let query = schemaClient
+            .from(tableName(WEEKLY_AGG_VIEW))
+            .select("week,measure_unit,filter_value,metric_id,value")
+            .eq("measure_unit", measureUnit)
+            .in("filter_value", chunk)
+            .order("week", { ascending: true })
+            .order("filter_value", { ascending: true, nullsFirst: false })
+            .order("metric_id", { ascending: true });
 
-        if (weeks.length > 0) {
-          query = query.in("week", weeks);
-        }
+          if (weeks.length > 0) {
+            query = query.in("week", weeks);
+          }
 
-        if (metricIds.length > 0) {
-          query = query.in("metric_id", metricIds);
-        }
+          if (metricIds.length > 0) {
+            query = query.in("metric_id", metricIds);
+          }
 
-        return query;
-      });
+          const { data, error } = await query;
+          if (error) throw new Error(error.message);
+          return (data ?? []) as HeatmapAggRow[];
+        })
+      );
+
+      rows = rowsByChunk.flat();
     }
   } else {
     rows = await fetchPagedRows<HeatmapAggRow>((from, to) => {
