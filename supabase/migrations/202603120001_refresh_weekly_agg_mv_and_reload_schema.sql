@@ -3,6 +3,16 @@
 -- - *_rate metrics -> AVG
 -- - other metrics  -> MAX
 
+create or replace view bigquery.weeks_view as
+select distinct
+  week,
+  to_date('20' || substr(week, 1, 8), 'YYYY.MM.DD') as week_start_date
+from bigquery.data_mart_1_social_match
+where period_type = 'week'
+  and week is not null
+  and length(trim(week)) >= 8
+  and to_date('20' || substr(week, 1, 8), 'YYYY.MM.DD') <= current_date;
+
 drop materialized view if exists bigquery.weekly_agg_mv;
 
 create materialized view bigquery.weekly_agg_mv as
