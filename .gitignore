@@ -16,3 +16,6 @@ dist/
 
 # os
 .DS_Store
+
+# typescript
+tsconfig.tsbuildinfo

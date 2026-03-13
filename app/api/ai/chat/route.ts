@@ -109,7 +109,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing messages." }, { status: 400 });
     }
 
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
 
     // If no API key, use template fallback
     if (!apiKey) {
@@ -118,26 +118,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ reply });
     }
 
-    // OpenAI GPT call
-    const { default: OpenAI } = await import("openai");
-    const openai = new OpenAI({ apiKey });
+    // Claude API call
+    const { default: Anthropic } = await import("@anthropic-ai/sdk");
+    const anthropic = new Anthropic({ apiKey });
 
     const systemPrompt = buildSystemPrompt(context);
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...messages.map((m) => ({
-          role: m.role as "user" | "assistant",
-          content: m.content,
-        })),
-      ],
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-5-20250929",
       max_tokens: 1024,
-      temperature: 0.7,
+      system: systemPrompt,
+      messages: messages.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
     });
 
-    const reply = completion.choices[0]?.message?.content ?? "응답을 생성하지 못했습니다.";
+    const reply =
+      response.content[0]?.type === "text"
+        ? response.content[0].text
+        : "응답을 생성하지 못했습니다.";
     return NextResponse.json({ reply });
   } catch (error) {
     return NextResponse.json(
