@@ -6,29 +6,22 @@ import ControlBar from "./components/ControlBar";
 import MetricTable from "./components/MetricTable";
 import EntityMetricTable from "./components/EntityMetricTable";
 import ErrorLogPanel, { ErrorLogItem } from "./components/ErrorLogPanel";
-import { ChatContext, Entity, FilterOption, FilterTemplate, FilterTemplateConfig, MeasurementUnit, Metric, PeriodUnit, SummaryPayload } from "./types";
+import {
+  ChatContext,
+  Entity,
+  FilterOption,
+  FilterTemplate,
+  FilterTemplateConfig,
+  MeasurementUnit,
+  MeasurementUnitOption,
+  Metric,
+  PeriodUnit,
+  SummaryPayload
+} from "./types";
 import AiChat from "./components/AiChat";
 
 const ALL_LABEL = "전체";
 const ALL_VALUE = "all";
-
-const unitLabel: Record<MeasurementUnit, string> = {
-  all: ALL_LABEL,
-  area_group: "지역 그룹",
-  area: "지역",
-  stadium_group: "구장 그룹",
-  stadium: "구장",
-  region_group: "권역 그룹",
-  region: "권역",
-  court: "면"
-};
-
-const drilldownUnitLabel: Record<DrilldownUnit, string> = {
-  area_group: "지역그룹",
-  area: "지역",
-  stadium_group: "구장그룹",
-  stadium: "구장"
-};
 
 const metricFormats: Record<string, Metric["format"]> = {};
 const preferredDefaultMetricIds = [
@@ -111,14 +104,52 @@ type HeatmapRow = {
   metrics: Record<string, number>;
 };
 
-type DrilldownUnit = "area_group" | "area" | "stadium_group" | "stadium";
-type DrilldownParent = { unit: DrilldownUnit; value: string } | null;
-type DrilldownTrailItem = { unit: DrilldownUnit; value: string };
+type DrilldownParent = { unit: MeasurementUnit; value: string } | null;
+type DrilldownHistoryItem = {
+  measurementUnit: MeasurementUnit;
+  filterValue: string;
+  parent: DrilldownParent;
+};
+type PendingDrilldown = {
+  entityName: string;
+  sourceUnit: MeasurementUnit;
+} | null;
 
-const nextUnitByUnit: Partial<Record<MeasurementUnit, DrilldownUnit>> = {
-  area_group: "area",
-  area: "stadium_group",
-  stadium_group: "stadium"
+const drilldownColumnsByUnit: Record<string, string[]> = {
+  area_group: ["area_group"],
+  area: ["area"],
+  area_group_and_time: ["area_group", "time"],
+  area_and_time: ["area", "time"],
+  stadium_group: ["stadium_group"],
+  stadium: ["stadium"],
+  stadium_group_and_time: ["stadium_group", "time"],
+  stadium_and_time: ["stadium", "time"],
+  time: ["time"],
+  hour: ["hour"],
+  yoil_and_hour: ["yoil", "hour"],
+  yoil_group_and_hour: ["yoil_group", "hour"]
+};
+
+const getDrilldownOptionsForSource = (
+  sourceUnit: MeasurementUnit,
+  options: MeasurementUnitOption[]
+) => {
+  const sourceColumns = drilldownColumnsByUnit[sourceUnit] ?? [];
+  return options.filter((option) => {
+    if (option.value === "all" || option.value === sourceUnit) return false;
+    const optionColumns = drilldownColumnsByUnit[option.value] ?? [];
+    if (sourceColumns.length === 0 || optionColumns.length <= 1) return true;
+    if (!sourceColumns.every((column) => optionColumns.includes(column))) return true;
+
+    const remainingColumns = optionColumns.filter((column) => !sourceColumns.includes(column));
+    if (remainingColumns.length !== 1) return true;
+
+    return !options.some((candidate) => {
+      if (candidate.value === option.value) return false;
+      const candidateColumns = drilldownColumnsByUnit[candidate.value] ?? [];
+      return candidateColumns.length === 1 && candidateColumns[0] === remainingColumns[0];
+    });
+  });
 };
 
 
@@ -160,10 +191,11 @@ const buildContext = (
   primaryMetricId: string | null,
   seriesByEntity: Record<string, Record<string, number[]>>,
   measurementUnit: MeasurementUnit,
-  filterValue: string
+  filterValue: string,
+  measurementUnitLabelMap: Record<string, string>
 ) => {
   const unitName =
-    measurementUnit === "all" ? ALL_LABEL : unitLabel[measurementUnit] ?? measurementUnit;
+    measurementUnit === "all" ? ALL_LABEL : measurementUnitLabelMap[measurementUnit] ?? measurementUnit;
   const entityKey = measurementUnit === "all" ? ALL_LABEL : filterValue;
   const series = seriesByEntity[entityKey] ?? seriesByEntity[ALL_LABEL] ?? {};
   const latestIndex = 0;
@@ -189,6 +221,9 @@ export default function Home() {
   const [periodUnit] = useState<PeriodUnit>("week");
   const [periodRangeValue, setPeriodRangeValue] = useState("recent_8");
   const [measurementUnit, setMeasurementUnit] = useState<MeasurementUnit>("all");
+  const [measurementUnitOptions, setMeasurementUnitOptions] = useState<MeasurementUnitOption[]>([
+    { value: "all", label: ALL_LABEL }
+  ]);
   const [filterValue, setFilterValue] = useState(ALL_VALUE);
   const [appliedMeasurementUnit, setAppliedMeasurementUnit] = useState<MeasurementUnit>("all");
   const [appliedFilterValue, setAppliedFilterValue] = useState(ALL_VALUE);
@@ -201,8 +236,8 @@ export default function Home() {
   const [metricSearchTerm, setMetricSearchTerm] = useState("");
   const [showDeltaValues, setShowDeltaValues] = useState(true);
   const [drilldownParent, setDrilldownParent] = useState<DrilldownParent>(null);
-  const [drilldownTrail, setDrilldownTrail] = useState<DrilldownTrailItem[]>([]);
-  const [appliedDrilldownTrail, setAppliedDrilldownTrail] = useState<DrilldownTrailItem[]>([]);
+  const [appliedDrilldownHistory, setAppliedDrilldownHistory] = useState<DrilldownHistoryItem[]>([]);
+  const [pendingDrilldown, setPendingDrilldown] = useState<PendingDrilldown>(null);
 
   const [weeks, setWeeks] = useState<string[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
@@ -227,6 +262,14 @@ export default function Home() {
   const [templates, setTemplates] = useState<FilterTemplate[]>([]);
   const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
+
+  const measurementUnitLabelMap = useMemo(
+    () =>
+      Object.fromEntries(
+        measurementUnitOptions.map((option) => [option.value, option.label])
+      ) as Record<string, string>,
+    [measurementUnitOptions]
+  );
 
   const pushError = (message: string, detail?: string) => {
     setErrorLogs((prev) => {
@@ -276,6 +319,36 @@ export default function Home() {
     };
     return () => {
       console.error = originalError;
+    };
+  }, []);
+
+  useEffect(() => {
+    let canceled = false;
+
+    const loadMeasurementUnits = async () => {
+      try {
+        const response = await fetchJsonWithTimeout<{ units: MeasurementUnitOption[] }>("/api/measurement-units", 6000);
+        if (canceled) return;
+        const options = response.units?.length ? response.units : [{ value: "all", label: ALL_LABEL }];
+        setMeasurementUnitOptions(options);
+        if (!options.some((option) => option.value === measurementUnit)) {
+          setMeasurementUnit("all");
+          setFilterValue(ALL_VALUE);
+          setDrilldownParent(null);
+          setAppliedDrilldownHistory([]);
+          setPendingDrilldown(null);
+        }
+      } catch (error) {
+        if (!canceled) {
+          pushError("측정단위 정보를 불러오지 못했습니다.", (error as Error).message);
+        }
+      }
+    };
+
+    void loadMeasurementUnits();
+
+    return () => {
+      canceled = true;
     };
   }, []);
 
@@ -345,12 +418,20 @@ export default function Home() {
       setIsLoadingFilter(true);
       setErrorMessage(null);
       try {
+        const size = periodRangeSizeMap[periodRangeValue] ?? 8;
+        const weeksResponse = await fetchJsonWithTimeout<{ weeks: string[] }>(`/api/weeks?n=${size}`, 6000);
         const params = new URLSearchParams({ measureUnit: measurementUnit });
+        (weeksResponse.weeks ?? []).forEach((week) => {
+          params.append("week", week);
+        });
         if (drilldownParent?.unit && drilldownParent?.value) {
           params.set("parentUnit", drilldownParent.unit);
           params.set("parentValue", drilldownParent.value);
         }
-        const response = await fetchJson<{ options: string[] }>(`/api/filter-options?${params.toString()}`);
+        const response = await fetchJsonWithTimeout<{ options: string[] }>(
+          `/api/filter-options?${params.toString()}`,
+          15000
+        );
         if (canceled) return;
 
         const options = response.options ?? [];
@@ -361,8 +442,9 @@ export default function Home() {
       } catch (error) {
         if (!canceled) {
           const message = (error as Error).message;
-          setErrorMessage(message);
-          pushError("필터 옵션을 불러오지 못했습니다.", message);
+          setFilterOptions([{ label: ALL_LABEL, value: ALL_VALUE }]);
+          setFilterValue(ALL_VALUE);
+          pushError("필터 옵션 로딩 실패, 전체 옵션만 유지합니다.", message);
         }
       } finally {
         if (!canceled) setIsLoadingFilter(false);
@@ -374,7 +456,7 @@ export default function Home() {
     return () => {
       canceled = true;
     };
-  }, [measurementUnit, drilldownParent?.unit, drilldownParent?.value]);
+  }, [measurementUnit, drilldownParent?.unit, drilldownParent?.value, periodRangeValue]);
 
   const selectedMetrics = useMemo(() => {
     const map = new Map(metrics.map((metric) => [metric.id, metric]));
@@ -422,7 +504,7 @@ export default function Home() {
     measurementUnit?: MeasurementUnit;
     filterValue?: string;
     drilldownParent?: DrilldownParent;
-    drilldownTrail?: DrilldownTrailItem[];
+    drilldownHistory?: DrilldownHistoryItem[];
   }) => {
     const targetMeasurementUnit =
       overrides && "measurementUnit" in overrides && overrides.measurementUnit !== undefined
@@ -436,10 +518,16 @@ export default function Home() {
       overrides && "drilldownParent" in overrides
         ? (overrides.drilldownParent ?? null)
         : drilldownParent;
-    const targetDrilldownTrail =
-      overrides && "drilldownTrail" in overrides && overrides.drilldownTrail !== undefined
-        ? overrides.drilldownTrail
-        : drilldownTrail;
+    const targetDrilldownHistory =
+      overrides && "drilldownHistory" in overrides && overrides.drilldownHistory !== undefined
+        ? overrides.drilldownHistory
+        : [
+            {
+              measurementUnit: targetMeasurementUnit,
+              filterValue: targetFilterValue,
+              parent: targetDrilldownParent
+            }
+          ];
 
     if (!selectedMetricIds.length) {
       setErrorMessage("지표를 최소 1개 선택해주세요.");
@@ -504,8 +592,9 @@ export default function Home() {
       setSeriesByEntity(nextSeries);
       setAppliedMeasurementUnit(targetMeasurementUnit);
       setAppliedFilterValue(targetFilterValue);
-      setAppliedDrilldownTrail(targetDrilldownTrail);
+      setAppliedDrilldownHistory(targetDrilldownHistory);
       setShowResults(true);
+      setPendingDrilldown(null);
 
       const context = buildContext(
         nextWeeks,
@@ -513,7 +602,8 @@ export default function Home() {
         selectedMetrics[0]?.id ?? null,
         nextSeries,
         targetMeasurementUnit,
-        targetFilterValue === ALL_VALUE ? ALL_LABEL : targetFilterValue
+        targetFilterValue === ALL_VALUE ? ALL_LABEL : targetFilterValue,
+        measurementUnitLabelMap
       );
 
       setIsSummaryLoading(true);
@@ -540,20 +630,31 @@ export default function Home() {
   };
 
   const handleSearch = async () => {
-    await runSearch();
+    await runSearch({
+      measurementUnit,
+      filterValue,
+      drilldownParent: null,
+      drilldownHistory: [
+        {
+          measurementUnit,
+          filterValue,
+          parent: null
+        }
+      ]
+    });
   };
 
   const handleMeasurementChange = (value: MeasurementUnit) => {
     setMeasurementUnit(value);
     setFilterValue(ALL_VALUE);
     setDrilldownParent(null);
-    setDrilldownTrail([]);
+    setPendingDrilldown(null);
   };
 
   const handleFilterChange = (value: string) => {
     setFilterValue(value);
     setDrilldownParent(null);
-    setDrilldownTrail([]);
+    setPendingDrilldown(null);
   };
 
   const handlePeriodRangeChange = (value: string) => {
@@ -561,40 +662,15 @@ export default function Home() {
   };
 
   const handleEntityClick = (entityName: string) => {
-    const nextUnit = nextUnitByUnit[measurementUnit];
-    if (!nextUnit) {
-      setFilterValue(entityName);
-      setDrilldownParent(null);
-      setDrilldownTrail([]);
-      void runSearch({
-        measurementUnit,
-        filterValue: entityName,
-        drilldownParent: null,
-        drilldownTrail: []
-      });
+    if (pendingDrilldown?.entityName === entityName) {
+      setPendingDrilldown(null);
       return;
     }
-
-    const nextTrail: DrilldownTrailItem[] = [
-      ...drilldownTrail,
-      {
-        unit: measurementUnit as DrilldownUnit,
-        value: entityName
-      }
-    ];
-    const parent: DrilldownParent = {
-      unit: measurementUnit as DrilldownUnit,
-      value: entityName
-    };
-    setMeasurementUnit(nextUnit);
-    setFilterValue(ALL_VALUE);
-    setDrilldownParent(parent);
-    setDrilldownTrail(nextTrail);
-    void runSearch({
-      measurementUnit: nextUnit,
-      filterValue: ALL_VALUE,
-      drilldownParent: parent,
-      drilldownTrail: nextTrail
+    const nextUnitOptions = getDrilldownOptionsForSource(appliedMeasurementUnit, measurementUnitOptions);
+    if (nextUnitOptions.length === 0) return;
+    setPendingDrilldown({
+      entityName,
+      sourceUnit: appliedMeasurementUnit
     });
   };
 
@@ -602,78 +678,77 @@ export default function Home() {
     setFilterValue(nextValue);
     void runSearch({
       measurementUnit,
-      filterValue: nextValue
-    });
-  };
-
-  const handleDrilldownNavigate = (stage: number) => {
-    const fullTrail = appliedDrilldownTrail.slice();
-    if (fullTrail.length === 0) return;
-
-    const normalizedStage = Math.max(0, Math.min(stage, fullTrail.length));
-    let nextMeasurement: MeasurementUnit;
-    let nextTrail: DrilldownTrailItem[];
-    let nextParent: DrilldownParent = null;
-
-    if (normalizedStage === 0) {
-      nextMeasurement = fullTrail[0].unit;
-      nextTrail = [];
-    } else {
-      nextTrail = fullTrail.slice(0, normalizedStage);
-      const parentNode = nextTrail[nextTrail.length - 1];
-      nextMeasurement = (nextUnitByUnit[parentNode.unit] ?? parentNode.unit) as MeasurementUnit;
-      nextParent = { unit: parentNode.unit, value: parentNode.value };
-    }
-
-    setMeasurementUnit(nextMeasurement);
-    setFilterValue(ALL_VALUE);
-    setDrilldownParent(nextParent);
-    setDrilldownTrail(nextTrail);
-    void runSearch({
-      measurementUnit: nextMeasurement,
-      filterValue: ALL_VALUE,
-      drilldownParent: nextParent,
-      drilldownTrail: nextTrail
-    });
-  };
-
-  const drilldownPathItems = useMemo(() => {
-    if (appliedMeasurementUnit === "all") {
-      return [] as { label: string; targetDepth: number; isCurrent: boolean }[];
-    }
-
-    if (appliedDrilldownTrail.length === 0) {
-      return [
+      filterValue: nextValue,
+      drilldownParent: null,
+      drilldownHistory: [
         {
-          label: `${drilldownUnitLabel[appliedMeasurementUnit as DrilldownUnit] ?? unitLabel[appliedMeasurementUnit] ?? appliedMeasurementUnit}(전체)`,
-          targetDepth: 0,
-          isCurrent: true
+          measurementUnit,
+          filterValue: nextValue,
+          parent: null
         }
-      ];
-    }
-
-    const items: { label: string; targetDepth: number; isCurrent: boolean }[] = [];
-    const rootUnit = appliedDrilldownTrail[0].unit;
-    items.push({
-      label: `${drilldownUnitLabel[rootUnit] ?? rootUnit}(전체)`,
-      targetDepth: 0,
-      isCurrent: false
+      ]
     });
+  };
 
-    appliedDrilldownTrail.forEach((node, index) => {
-      const childUnit = nextUnitByUnit[node.unit];
-      if (!childUnit) return;
-      const targetDepth = index + 1;
-      const isCurrent = targetDepth === appliedDrilldownTrail.length;
-      items.push({
-        label: `${drilldownUnitLabel[childUnit] ?? childUnit}(${node.value})`,
-        targetDepth,
-        isCurrent
-      });
+  const handlePendingDrilldownSelect = (targetUnit: MeasurementUnit) => {
+    if (!pendingDrilldown) return;
+    const parent: DrilldownParent = {
+      unit: pendingDrilldown.sourceUnit,
+      value: pendingDrilldown.entityName
+    };
+    const baseHistory =
+      appliedDrilldownHistory.length > 0
+        ? appliedDrilldownHistory
+        : [{ measurementUnit: appliedMeasurementUnit, filterValue: appliedFilterValue, parent: null }];
+    const nextHistory = [
+      ...baseHistory,
+      {
+        measurementUnit: targetUnit,
+        filterValue: ALL_VALUE,
+        parent
+      }
+    ];
+    setMeasurementUnit(targetUnit);
+    setFilterValue(ALL_VALUE);
+    setDrilldownParent(parent);
+    void runSearch({
+      measurementUnit: targetUnit,
+      filterValue: ALL_VALUE,
+      drilldownParent: parent,
+      drilldownHistory: nextHistory
     });
+  };
 
-    return items;
-  }, [appliedDrilldownTrail, appliedMeasurementUnit]);
+  const handleDrilldownNavigate = (targetIndex: number) => {
+    const target = appliedDrilldownHistory[targetIndex];
+    if (!target) return;
+    const nextHistory = appliedDrilldownHistory.slice(0, targetIndex + 1);
+    setMeasurementUnit(target.measurementUnit);
+    setFilterValue(target.filterValue);
+    setDrilldownParent(target.parent);
+    setPendingDrilldown(null);
+    void runSearch({
+      measurementUnit: target.measurementUnit,
+      filterValue: target.filterValue,
+      drilldownParent: target.parent,
+      drilldownHistory: nextHistory
+    });
+  };
+
+  const drilldownPathItems = useMemo(
+    () =>
+      appliedDrilldownHistory.map((item, index) => {
+        const valueLabel =
+          item.parent?.value ??
+          (item.filterValue === ALL_VALUE ? ALL_LABEL : item.filterValue);
+        return {
+          label: `${measurementUnitLabelMap[item.measurementUnit] ?? item.measurementUnit}(${valueLabel})`,
+          targetIndex: index,
+          isCurrent: index === appliedDrilldownHistory.length - 1
+        };
+      }),
+    [appliedDrilldownHistory, measurementUnitLabelMap]
+  );
 
   const handleRemoveSelectedMetric = (metricId: string) => {
     setSelectedMetricIds((prev) => prev.filter((id) => id !== metricId));
@@ -797,7 +872,8 @@ export default function Home() {
     setMeasurementUnit(config.measurementUnit ?? "all");
     setFilterValue(config.filterValue ?? ALL_VALUE);
     setDrilldownParent(null);
-    setDrilldownTrail([]);
+    setAppliedDrilldownHistory([]);
+    setPendingDrilldown(null);
     if (config.selectedMetricIds?.length) {
       setSelectedMetricIds(config.selectedMetricIds);
     }
@@ -874,9 +950,10 @@ export default function Home() {
       selectedMetrics[0]?.id ?? null,
       seriesByEntity,
       appliedMeasurementUnit,
-      appliedFilterValue === ALL_VALUE ? ALL_LABEL : appliedFilterValue
+      appliedFilterValue === ALL_VALUE ? ALL_LABEL : appliedFilterValue,
+      measurementUnitLabelMap
     ) as ChatContext;
-  }, [showResults, weeks, selectedMetrics, seriesByEntity, appliedMeasurementUnit, appliedFilterValue]);
+  }, [showResults, weeks, selectedMetrics, seriesByEntity, appliedMeasurementUnit, appliedFilterValue, measurementUnitLabelMap]);
 
   return (
     <main className="app-shell">
@@ -923,6 +1000,7 @@ export default function Home() {
           periodRangeOptions={periodRangeOptions}
           onPeriodRangeChange={handlePeriodRangeChange}
           measurementUnit={measurementUnit}
+          measurementUnitOptions={measurementUnitOptions}
           onMeasurementUnitChange={handleMeasurementChange}
           filterOptions={filterOptions}
           filterValue={filterValue}
@@ -945,7 +1023,8 @@ export default function Home() {
             setMeasurementUnit("all");
             setFilterValue(ALL_VALUE);
             setDrilldownParent(null);
-            setDrilldownTrail([]);
+            setAppliedDrilldownHistory([]);
+            setPendingDrilldown(null);
             setSelectedMetricIds(preferredDefaultMetricIds.filter((id) => metrics.some((m) => m.id === id)));
             setActiveTemplateId(null);
           }}
@@ -987,6 +1066,13 @@ export default function Home() {
                 onEntityFilterSelect={handleEntityFilterSelect}
                 drilldownPathItems={drilldownPathItems}
                 onDrilldownNavigate={handleDrilldownNavigate}
+                expandedEntityName={pendingDrilldown?.entityName ?? null}
+                drilldownUnitOptions={getDrilldownOptionsForSource(
+                  pendingDrilldown?.sourceUnit ?? appliedMeasurementUnit,
+                  measurementUnitOptions
+                )}
+                onDrilldownSelect={handlePendingDrilldownSelect}
+                onDrilldownClose={() => setPendingDrilldown(null)}
               />
             )}
           </div>

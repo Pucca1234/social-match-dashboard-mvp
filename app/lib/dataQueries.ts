@@ -10,9 +10,39 @@ const ENTITY_HIERARCHY_VIEW = "entity_hierarchy_mv";
 const WEEK_LIMIT_DEFAULT = 104;
 const POSTGREST_PAGE_SIZE = 1000;
 const WEEK_FETCH_PAGE_SIZE = 500;
+const ENTITY_LABEL_SEPARATOR = " | ";
+const AGG_KEY_SEPARATOR = "\u001f";
+const LEGACY_MV_UNITS = new Set(["all", "area_group", "area", "stadium_group", "stadium"]);
+const MEASUREMENT_UNIT_LABEL_OVERRIDES: Record<string, string> = {
+  all: ALL_LABEL,
+  area_group: "지역그룹",
+  area: "지역",
+  stadium_group: "구장그룹",
+  stadium: "구장"
+};
+const MEASUREMENT_UNIT_SORT_ORDER = [
+  "all",
+  "area_group",
+  "area",
+  "area_group_and_time",
+  "area_and_time",
+  "stadium_group",
+  "stadium",
+  "stadium_group_and_time",
+  "stadium_and_time",
+  "time",
+  "hour",
+  "yoil_and_hour",
+  "yoil_group_and_hour"
+];
 
-type QueryMeasureUnit = "all" | "area_group" | "area" | "stadium_group" | "stadium";
+type QueryMeasureUnit = string;
 type QueryDrilldownUnit = Exclude<QueryMeasureUnit, "all">;
+type MeasurementUnitOption = { value: string; label: string };
+type UnitConfig = {
+  dimensionType: string;
+  entityColumns: string[];
+};
 
 type WeekEntry = { week: string; startDate: string | null };
 type MetricDictRow = {
@@ -96,12 +126,94 @@ const metricColumnBlacklist = new Set([
   "dimension_type"
 ]);
 
-const columnByUnit: Record<Exclude<QueryMeasureUnit, "all">, string> = {
+const unitConfigByUnit: Record<string, UnitConfig> = {
+  area_group: { dimensionType: "area_group", entityColumns: ["area_group"] },
+  area: { dimensionType: "area", entityColumns: ["area"] },
+  area_group_and_time: { dimensionType: "area_group_and_time", entityColumns: ["area_group", "time"] },
+  area_and_time: { dimensionType: "area_and_time", entityColumns: ["area", "time"] },
+  stadium_group: { dimensionType: "stadium_group", entityColumns: ["stadium_group"] },
+  stadium: { dimensionType: "stadium", entityColumns: ["stadium"] },
+  stadium_group_and_time: { dimensionType: "stadium_group_and_time", entityColumns: ["stadium_group", "time"] },
+  stadium_and_time: { dimensionType: "stadium_and_time", entityColumns: ["stadium", "time"] },
+  time: { dimensionType: "time", entityColumns: ["time"] },
+  hour: { dimensionType: "hour", entityColumns: ["hour"] },
+  yoil_and_hour: { dimensionType: "yoil_and_hour", entityColumns: ["yoil", "hour"] },
+  yoil_group_and_hour: { dimensionType: "yoil_group_and_hour", entityColumns: ["yoil_group", "hour"] }
+};
+const columnByUnit: Record<string, string> = {
   area_group: "area_group",
   area: "area",
   stadium_group: "stadium_group",
   stadium: "stadium"
 };
+
+const getUnitConfig = (unit: string): UnitConfig | null => {
+  if (unit === "all") return null;
+  return unitConfigByUnit[unit] ?? null;
+};
+
+const getEntityColumnsForUnit = (unit: string) => getUnitConfig(unit)?.entityColumns ?? [];
+const resolveQueryUnitForDrilldown = (
+  measureUnit: QueryDrilldownUnit,
+  parentUnit?: QueryDrilldownUnit | null
+) => {
+  if (!parentUnit) return measureUnit;
+
+  const targetColumns = getEntityColumnsForUnit(measureUnit);
+  const parentColumns = getEntityColumnsForUnit(parentUnit);
+  if (targetColumns.length === 0 || parentColumns.length === 0) {
+    return measureUnit;
+  }
+
+  const requiredColumns = new Set([...targetColumns, ...parentColumns]);
+  const candidates = Object.entries(unitConfigByUnit)
+    .filter(([, config]) => Array.from(requiredColumns).every((column) => config.entityColumns.includes(column)))
+    .sort((a, b) => a[1].entityColumns.length - b[1].entityColumns.length);
+
+  return (candidates[0]?.[0] as QueryDrilldownUnit | undefined) ?? measureUnit;
+};
+
+const buildEntityLabel = (unit: string, row: Record<string, unknown>) => {
+  if (unit === "all") return ALL_LABEL;
+  const columns = getEntityColumnsForUnit(unit);
+  if (columns.length === 0) return "";
+  const parts = columns.map((column) => String(row[column] ?? "").trim());
+  return parts.some((part) => part.length === 0) ? "" : parts.join(ENTITY_LABEL_SEPARATOR);
+};
+
+const parseEntityLabel = (unit: string, entityLabel: string) => {
+  const columns = getEntityColumnsForUnit(unit);
+  if (columns.length === 0) return {} as Record<string, string>;
+  const parts = columns.length === 1 ? [entityLabel.trim()] : entityLabel.split(ENTITY_LABEL_SEPARATOR).map((part) => part.trim());
+  if (parts.length !== columns.length || parts.some((part) => part.length === 0)) {
+    return {} as Record<string, string>;
+  }
+  return Object.fromEntries(columns.map((column, index) => [column, parts[index]]));
+};
+
+const applyWeeklyBaseScope = (query: any) =>
+  query
+    .eq("period_type", "week")
+    .is("day", null)
+    .not("dimension_type", "is", null);
+
+const applyEntityFilterToQuery = (query: any, unit: string, entityLabel: string | null) => {
+  if (!entityLabel || entityLabel.trim().length === 0 || unit === "all") return query;
+  const pairs = Object.entries(parseEntityLabel(unit, entityLabel));
+  return pairs.reduce((currentQuery, [column, value]) => currentQuery.eq(column, value), query);
+};
+
+const sortMeasurementUnits = (units: MeasurementUnitOption[]) =>
+  units.slice().sort((a, b) => {
+    const aIndex = MEASUREMENT_UNIT_SORT_ORDER.indexOf(a.value);
+    const bIndex = MEASUREMENT_UNIT_SORT_ORDER.indexOf(b.value);
+    if (aIndex !== -1 || bIndex !== -1) {
+      if (aIndex === -1) return 1;
+      if (bIndex === -1) return -1;
+      return aIndex - bIndex;
+    }
+    return a.label.localeCompare(b.label, "ko");
+  });
 
 const toCategoryLabel = (value: unknown) => {
   const text = String(value ?? "").trim();
@@ -166,6 +278,51 @@ const getChildEntityValues = async ({
     new Set(
       (data ?? [])
         .map((row) => row[childColumn])
+        .filter((value): value is string => !isBlank(value))
+    )
+  ).sort();
+};
+
+const getConstrainedEntityValues = async ({
+  measureUnit,
+  parentUnit,
+  parentValue,
+  weeks
+}: {
+  measureUnit: QueryDrilldownUnit;
+  parentUnit?: QueryDrilldownUnit | null;
+  parentValue?: string | null;
+  weeks?: string[];
+}) => {
+  const unitConfig = getUnitConfig(measureUnit);
+  if (!unitConfig) return [];
+  const queryUnit = resolveQueryUnitForDrilldown(measureUnit, parentUnit);
+  const queryUnitConfig = getUnitConfig(queryUnit);
+  if (!queryUnitConfig) return [];
+
+  const selectColumns = Array.from(
+    new Set([...queryUnitConfig.entityColumns, ...getEntityColumnsForUnit(parentUnit ?? "")])
+  ).join(",");
+  const data = await fetchPagedRows<Record<string, unknown>>((from, to) =>
+    {
+      let query = applyWeeklyBaseScope(
+        schemaClient
+          .from(tableName(BASE_TABLE))
+          .select(selectColumns)
+          .eq("dimension_type", queryUnitConfig.dimensionType)
+          .range(from, to)
+      );
+      if (weeks && weeks.length > 0) {
+        query = query.in("week", weeks);
+      }
+      return applyEntityFilterToQuery(query, parentUnit ?? "", parentValue ?? null);
+    }
+  );
+
+  return Array.from(
+    new Set(
+      (data ?? [])
+        .map((row) => buildEntityLabel(measureUnit, row))
         .filter((value): value is string => !isBlank(value))
     )
   ).sort();
@@ -276,19 +433,19 @@ const mapHeatmapRows = (rows: HeatmapAggRow[], measureUnit: QueryMeasureUnit, me
 const aggregateRowsToHeatmap = ({
   rows,
   measureUnit,
-  unitColumn,
+  entityBuilder,
   metricIds
 }: {
   rows: Record<string, unknown>[];
   measureUnit: QueryMeasureUnit;
-  unitColumn: string | null;
+  entityBuilder: (row: Record<string, unknown>) => string;
   metricIds: string[];
 }) => {
   type AggState = { max: number; sum: number; count: number };
   const accumulator = new Map<string, AggState>();
   for (const row of rows) {
     const week = String(row.week ?? "").trim();
-    const entity = unitColumn ? String(row[unitColumn] ?? "").trim() : ALL_LABEL;
+    const entity = entityBuilder(row);
     if (!week || !entity) continue;
 
     for (const metricId of metricIds) {
@@ -296,7 +453,7 @@ const aggregateRowsToHeatmap = ({
       const value = typeof raw === "number" ? raw : Number(raw ?? NaN);
       if (!Number.isFinite(value)) continue;
 
-      const key = `${week}|${entity}|${metricId}`;
+      const key = [week, entity, metricId].join(AGG_KEY_SEPARATOR);
       const prev = accumulator.get(key) ?? { max: Number.NEGATIVE_INFINITY, sum: 0, count: 0 };
       prev.max = Math.max(prev.max, value);
       prev.sum += value;
@@ -307,7 +464,7 @@ const aggregateRowsToHeatmap = ({
 
   const rowsOut: HeatmapAggRow[] = [];
   for (const [key, state] of accumulator.entries()) {
-    const [week, entity, metricId] = key.split("|");
+    const [week, entity, metricId] = key.split(AGG_KEY_SEPARATOR);
     const value = isRateMetric(metricId) ? state.sum / Math.max(state.count, 1) : state.max;
     rowsOut.push({
       week,
@@ -336,10 +493,11 @@ const getHeatmapFromBaseTable = async ({
   parentUnit?: QueryDrilldownUnit | null;
   parentValue?: string | null;
 }) => {
+  const unitConfig = getUnitConfig(measureUnit);
   if (measureUnit === "all") {
     const selectColumns = Array.from(new Set(["week", "dimension_type", "area", ...metricIds])).join(",");
     const allRows = await fetchPagedRows<Record<string, unknown>>((from, to) => {
-      let query = applyBaseFilters(
+      let query = applyWeeklyBaseScope(
         schemaClient
           .from(tableName(BASE_TABLE))
           .select(selectColumns)
@@ -354,7 +512,7 @@ const getHeatmapFromBaseTable = async ({
     const fromAll = aggregateRowsToHeatmap({
       rows: allRows,
       measureUnit: "all",
-      unitColumn: null,
+      entityBuilder: () => ALL_LABEL,
       metricIds
     });
 
@@ -370,7 +528,7 @@ const getHeatmapFromBaseTable = async ({
 
     // Latest ingestion may miss dimension_type='all'. Build "all" from area rows for missing weeks.
     const areaRows = await fetchPagedRows<Record<string, unknown>>((from, to) => {
-      let query = applyBaseFilters(
+      let query = applyWeeklyBaseScope(
         schemaClient
           .from(tableName(BASE_TABLE))
           .select(selectColumns)
@@ -385,7 +543,7 @@ const getHeatmapFromBaseTable = async ({
     const byArea = aggregateRowsToHeatmap({
       rows: areaRows,
       measureUnit: "area",
-      unitColumn: "area",
+      entityBuilder: (row) => String(row.area ?? "").trim(),
       metricIds
     });
 
@@ -431,34 +589,48 @@ const getHeatmapFromBaseTable = async ({
     return Array.from(merged.values());
   }
 
-  const unitColumn = columnByUnit[measureUnit];
-  const selectColumns = Array.from(new Set(["week", unitColumn, ...metricIds])).join(",");
+  if (!unitConfig) {
+    throw new Error(`Unsupported measure unit: ${measureUnit}`);
+  }
+  const queryUnit = resolveQueryUnitForDrilldown(measureUnit, parentUnit);
+  const queryUnitConfig = getUnitConfig(queryUnit);
+  if (!queryUnitConfig) {
+    throw new Error(`Unsupported drilldown query unit: ${queryUnit}`);
+  }
+
+  const selectColumns = Array.from(
+    new Set([
+      "week",
+      "dimension_type",
+      ...queryUnitConfig.entityColumns,
+      ...getEntityColumnsForUnit(parentUnit ?? ""),
+      ...metricIds
+    ])
+  ).join(",");
   const data = await fetchPagedRows<Record<string, unknown>>((from, to) => {
-    let query = applyBaseFilters(
+    let query = applyWeeklyBaseScope(
       schemaClient
         .from(tableName(BASE_TABLE))
         .select(selectColumns)
         .order("week", { ascending: true })
-        .order(unitColumn, { ascending: true, nullsFirst: false })
         .range(from, to)
     );
     if (weeks.length > 0) {
       query = query.in("week", weeks);
     }
-    query = query.not(unitColumn, "is", null);
-    if (filterValue) {
-      query = query.eq(unitColumn, filterValue);
+    query = query.eq("dimension_type", queryUnitConfig.dimensionType);
+    for (const column of queryUnitConfig.entityColumns) {
+      query = query.not(column, "is", null);
     }
-    if (parentUnit && parentValue && columnByUnit[parentUnit]) {
-      query = query.eq(columnByUnit[parentUnit], parentValue);
-    }
-    return query;
+    query = applyEntityFilterToQuery(query, measureUnit, filterValue);
+    query = applyEntityFilterToQuery(query, parentUnit ?? "", parentValue ?? null);
+    return query.order(queryUnitConfig.entityColumns[0], { ascending: true, nullsFirst: false });
   });
 
   return aggregateRowsToHeatmap({
     rows: data,
     measureUnit,
-    unitColumn,
+    entityBuilder: (row) => buildEntityLabel(measureUnit, row),
     metricIds
   });
 };
@@ -528,35 +700,76 @@ export async function getMetricDictionary(timings?: { queryMs?: number; processM
   return result;
 }
 
+export async function getMeasurementUnitOptions() {
+  const { data, error } = await schemaClient.from(tableName(METRIC_TABLE)).select("metric,korean_name");
+
+  if (error) throw new Error(error.message);
+
+  const supportedUnits = Array.from(new Set(Object.keys(unitConfigByUnit)));
+  const metricLabelMap = new Map(
+    ((data ?? []) as { metric: string; korean_name: string | null }[])
+      .filter((row) => row.metric)
+      .map((row) => [row.metric, String(row.korean_name ?? "").trim()])
+  );
+
+  const options: MeasurementUnitOption[] = [
+    { value: "all", label: ALL_LABEL },
+    ...supportedUnits.map((unit) => ({
+      value: unit,
+      label: MEASUREMENT_UNIT_LABEL_OVERRIDES[unit] || metricLabelMap.get(unit) || unit
+    }))
+  ];
+
+  return sortMeasurementUnits(
+    Array.from(new Map(options.map((option) => [option.value, option])).values())
+  );
+}
+
+export async function getMeasurementUnitIds() {
+  const options = await getMeasurementUnitOptions();
+  return options.map((option) => option.value);
+}
+
 export async function getFilterOptions(
   measureUnit: QueryMeasureUnit,
-  options?: { parentUnit?: QueryDrilldownUnit | null; parentValue?: string | null }
+  options?: { parentUnit?: QueryDrilldownUnit | null; parentValue?: string | null; weeks?: string[] }
 ) {
   if (measureUnit === "all") return [ALL_LABEL];
+  const unitConfig = getUnitConfig(measureUnit);
+  if (!unitConfig) {
+    throw new Error(`Unsupported measure unit: ${measureUnit}`);
+  }
 
   const parentUnit = options?.parentUnit;
   const parentValue = options?.parentValue && options.parentValue.trim().length > 0 ? options.parentValue.trim() : null;
+  const weeks = (options?.weeks ?? []).map((week) => week.trim()).filter((week) => week.length > 0);
 
   if (parentUnit && parentValue) {
-    return getChildEntityValues({ measureUnit, parentUnit, parentValue });
+    if (LEGACY_MV_UNITS.has(measureUnit) && LEGACY_MV_UNITS.has(parentUnit)) {
+      return getChildEntityValues({ measureUnit, parentUnit, parentValue });
+    }
+    return getConstrainedEntityValues({ measureUnit, parentUnit, parentValue, weeks });
   }
 
-  const data = await fetchPagedRows<{ filter_value: string | null }>((from, to) =>
-    schemaClient
-      .from(tableName(WEEKLY_AGG_VIEW))
-      .select("filter_value")
-      .eq("measure_unit", measureUnit)
-      .eq("metric_id", "total_match_cnt")
-      .not("filter_value", "is", null)
-      .order("filter_value", { ascending: true, nullsFirst: false })
-      .range(from, to)
-  );
+  if (!parentUnit && LEGACY_MV_UNITS.has(measureUnit)) {
+    const data = await fetchPagedRows<{ filter_value: string | null }>((from, to) =>
+      schemaClient
+        .from(tableName(WEEKLY_AGG_VIEW))
+        .select("filter_value")
+        .eq("measure_unit", measureUnit)
+        .eq("metric_id", "total_match_cnt")
+        .not("filter_value", "is", null)
+        .order("filter_value", { ascending: true, nullsFirst: false })
+        .range(from, to)
+    );
 
-  const values = (data ?? [])
-    .map((row) => row.filter_value)
-    .filter((value): value is string => !isBlank(value));
+    const values = (data ?? [])
+      .map((row) => row.filter_value)
+      .filter((value): value is string => !isBlank(value));
 
-  return Array.from(new Set(values)).sort();
+    return Array.from(new Set(values)).sort();
+  }
+  return getConstrainedEntityValues({ measureUnit, weeks });
 }
 
 type HeatmapParams = {
@@ -580,50 +793,75 @@ export async function getHeatmap(
 
   const hasParentDrilldown =
     measureUnit !== "all" && Boolean(parentUnit && parentValue && parentValue.trim().length > 0);
+  const canUseMvPath = measureUnit === "all" || Boolean(getUnitConfig(measureUnit));
+  const preferBaseTablePath = measureUnit !== "all" && !LEGACY_MV_UNITS.has(measureUnit);
 
   const queryStart = Date.now();
   let rows: HeatmapAggRow[] = [];
-  if (hasParentDrilldown) {
-    const childValues = await getChildEntityValues({
-      measureUnit: measureUnit as QueryDrilldownUnit,
-      parentUnit: parentUnit as QueryDrilldownUnit,
-      parentValue: parentValue!.trim()
+  if (preferBaseTablePath) {
+    rows = await getHeatmapFromBaseTable({
+      measureUnit,
+      filterValue,
+      weeks,
+      metricIds,
+      parentUnit: parentUnit ?? null,
+      parentValue: parentValue ?? null
     });
+  } else if (canUseMvPath && hasParentDrilldown) {
+    const canUseLegacyParentMvPath =
+      LEGACY_MV_UNITS.has(measureUnit) && parentUnit && LEGACY_MV_UNITS.has(parentUnit);
 
-    if (childValues.length === 0) {
-      rows = [];
+    if (!canUseLegacyParentMvPath) {
+      rows = await getHeatmapFromBaseTable({
+        measureUnit,
+        filterValue,
+        weeks,
+        metricIds,
+        parentUnit: parentUnit ?? null,
+        parentValue: parentValue ?? null
+      });
     } else {
-      const rowsByChunk = await Promise.all(
-        chunkValues(
-          childValues,
-          Math.max(1, Math.floor(800 / Math.max(1, weeks.length * Math.max(metricIds.length, 1))))
-        ).map(async (chunk) => {
-          let query = schemaClient
-            .from(tableName(WEEKLY_AGG_VIEW))
-            .select("week,measure_unit,filter_value,metric_id,value")
-            .eq("measure_unit", measureUnit)
-            .in("filter_value", chunk)
-            .order("week", { ascending: true })
-            .order("filter_value", { ascending: true, nullsFirst: false })
-            .order("metric_id", { ascending: true });
+      const childValues = await getChildEntityValues({
+        measureUnit: measureUnit as QueryDrilldownUnit,
+        parentUnit: parentUnit as QueryDrilldownUnit,
+        parentValue: parentValue!.trim()
+      });
 
-          if (weeks.length > 0) {
-            query = query.in("week", weeks);
-          }
+      if (childValues.length === 0) {
+        rows = [];
+      } else {
+        const rowsByChunk = await Promise.all(
+          chunkValues(
+            childValues,
+            Math.max(1, Math.floor(800 / Math.max(1, weeks.length * Math.max(metricIds.length, 1))))
+          ).map(async (chunk) => {
+            let query = schemaClient
+              .from(tableName(WEEKLY_AGG_VIEW))
+              .select("week,measure_unit,filter_value,metric_id,value")
+              .eq("measure_unit", measureUnit)
+              .in("filter_value", chunk)
+              .order("week", { ascending: true })
+              .order("filter_value", { ascending: true, nullsFirst: false })
+              .order("metric_id", { ascending: true });
 
-          if (metricIds.length > 0) {
-            query = query.in("metric_id", metricIds);
-          }
+            if (weeks.length > 0) {
+              query = query.in("week", weeks);
+            }
 
-          const { data, error } = await query;
-          if (error) throw new Error(error.message);
-          return (data ?? []) as HeatmapAggRow[];
-        })
-      );
+            if (metricIds.length > 0) {
+              query = query.in("metric_id", metricIds);
+            }
 
-      rows = rowsByChunk.flat();
+            const { data, error } = await query;
+            if (error) throw new Error(error.message);
+            return (data ?? []) as HeatmapAggRow[];
+          })
+        );
+
+        rows = rowsByChunk.flat();
+      }
     }
-  } else {
+  } else if (canUseMvPath) {
     rows = await fetchPagedRows<HeatmapAggRow>((from, to) => {
       let query = schemaClient
         .from(tableName(WEEKLY_AGG_VIEW))
@@ -654,6 +892,15 @@ export async function getHeatmap(
 
       return query;
     });
+  } else {
+    rows = await getHeatmapFromBaseTable({
+      measureUnit,
+      filterValue,
+      weeks,
+      metricIds,
+      parentUnit: parentUnit ?? null,
+      parentValue: parentValue ?? null
+    });
   }
   let queryMs = Date.now() - queryStart;
   const requestedWeekSet = new Set(weeks);
@@ -661,7 +908,7 @@ export async function getHeatmap(
   const missingWeeks = weeks.filter((week) => requestedWeekSet.has(week) && !rowWeekSet.has(week));
   const fallbackWeeks = missingWeeks;
 
-  if (allowBaseFallback && (rows.length === 0 || fallbackWeeks.length > 0)) {
+  if (allowBaseFallback && LEGACY_MV_UNITS.has(measureUnit) && (rows.length === 0 || fallbackWeeks.length > 0)) {
     const fallbackStart = Date.now();
     const fallbackRows = await getHeatmapFromBaseTable({
       measureUnit,

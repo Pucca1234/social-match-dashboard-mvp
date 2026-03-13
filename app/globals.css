@@ -506,26 +506,8 @@ main {
   width: 160px;
 }
 
-.search-field-measurement {
-  min-width: 360px;
-}
-
-.search-field-measurement .segment-label {
-  margin-bottom: 2px;
-}
-
-.search-field-measurement .segment-row {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.search-field-measurement .segment-row.measurement button:first-child {
-  grid-column: auto;
-}
-
-.search-field-measurement .segment-btn {
-  padding: 8px 11px;
+.search-field-measurement-select {
+  min-width: 220px;
 }
 
 .search-action-group {
@@ -584,6 +566,30 @@ main {
 .result-stack {
   display: grid;
   gap: 18px;
+}
+
+.entity-cell-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.data-cell.data-entity.is-expanded {
+  z-index: 15;
+}
+
+.entity-drilldown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  min-width: 220px;
+  max-width: 260px;
+}
+
+.entity-drilldown-empty {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 7px 8px;
 }
 
 .table-head-row {
@@ -778,23 +784,6 @@ main {
 
 .data-entity.is-empty .name-title {
   visibility: hidden;
-}
-
-.entity-cell-btn {
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  font-weight: 700;
-  text-align: left;
-  cursor: pointer;
-  padding: 0;
-  width: 100%;
-  min-height: 100%;
-}
-
-.entity-cell-btn:hover {
-  color: var(--primary);
 }
 
 .data-cell.data-entity.is-clickable {
@@ -1606,7 +1595,8 @@ main {
   .search-field-period-range,
   .search-field-filter,
   .search-field-metric-picker,
-  .search-field-measurement {
+  .search-field-measurement,
+  .search-field-measurement-select {
     width: 100%;
     min-width: 0;
   }
