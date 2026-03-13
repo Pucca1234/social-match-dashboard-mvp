@@ -4,7 +4,7 @@
 
 ## 핵심 목적
 - 최근 8/12/24주 성과 추이 확인
-- 측정단위(`all`, `area_group`, `area`, `stadium_group`, `stadium`)별 비교
+- 측정단위(`all`, `area_group`, `area`, `stadium_group`, `stadium` 및 `dimension_type` 기반 확장 단위)별 비교
 - 지표 기반 의사결정 및 AI 요약/질문 응답 지원
 
 ## 기술 스택
@@ -19,6 +19,7 @@
 
 ## API
 - `GET /api/metrics`
+- `GET /api/measurement-units`
 - `GET /api/weeks?n=8|12|24`
 - `GET /api/filter-options?measureUnit=...`
 - `POST /api/heatmap`
@@ -202,6 +203,41 @@ npm run data:validate-recent-refresh
   - 다음 수동/정기 실행에서 DB 직결 헬스체크와 annotation 경고 제거 여부 확인
   - `SUPABASE_DB_URI` 운영값 점검:
     - pooler URI 사용 여부, 비밀번호 인코딩, `sslmode` 포함 여부 재확인
+
+## 2026-03-14 측정단위 확장 반영
+- 측정단위 목록:
+  - 검색박스 `측정단위`는 고정 4개가 아니라 `dimension_type`/`metric_store_native` 기반 동적 목록으로 전환
+  - 신규 API: `GET /api/measurement-units`
+  - 현재 노출 단위:
+    - `all`
+    - `area_group`, `area`, `stadium_group`, `stadium`
+    - `area_group_and_time`, `area_and_time`
+    - `stadium_group_and_time`, `stadium_and_time`
+    - `time`, `hour`
+    - `yoil_and_hour`, `yoil_group_and_hour`
+- 드릴다운 UX:
+  - 엔티티 셀 전체 클릭 시 드릴다운 메뉴 노출
+  - 드릴다운 메뉴는 엔티티 헤더 필터와 동일한 드롭다운 리스트 UI 사용
+  - 리스트 항목 선택 즉시 드릴다운 실행
+  - `_and_` 단위는 사용자에게 직접 강제하지 않고, 부모/대상 단위 조합에 맞는 실제 조회 그레인으로 내부 매핑
+  - 예시:
+    - `time -> area_group` 조회는 내부적으로 `area_group_and_time` 원천 그레인 사용
+    - `time -> area` 조회는 내부적으로 `area_and_time` 원천 그레인 사용
+- 조회 경로:
+  - 기존 legacy 단위(`all/area_group/area/stadium_group/stadium`)는 계속 `weekly_agg_mv` 우선 사용
+  - 확장 단위는 원격 DB 자원 한계로 `weekly_agg_mv` 확장을 운영에 적용하지 않고, 최근 선택 주차 범위 기준 원천 테이블 직접 조회로 처리
+  - 필터 옵션도 확장 단위는 선택된 최근 주차 범위 기준으로 원천 조회
+- 원격 DB 반영:
+  - 적용 완료 migration:
+    - `supabase/migrations/202603140003_add_indexes_for_expanded_dimension_queries.sql`
+  - 목적:
+    - `dimension_type + week + entity columns` 패턴의 확장 단위 조회 성능 개선
+  - 참고:
+    - `weekly_agg_mv`를 확장 단위까지 직접 재생성하는 시도는 원격 DB에서 temp disk 부족(`No space left on device`)으로 운영 반영 보류
+- 로컬 확인 기준:
+  - `time` 필터 옵션 약 1초대
+  - `area_and_time` 필터 옵션/heatmap 약 4~5초대
+  - `npm run build` 통과
 
 ## Supabase 배포 워크플로
 - 마이그레이션: `supabase/migrations/202602210001_weekly_agg_mv_v2.sql`

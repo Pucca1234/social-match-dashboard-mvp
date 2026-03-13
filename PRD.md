@@ -35,6 +35,14 @@
 - `area`
 - `stadium_group`
 - `stadium`
+- `area_group_and_time`
+- `area_and_time`
+- `stadium_group_and_time`
+- `stadium_and_time`
+- `time`
+- `hour`
+- `yoil_and_hour`
+- `yoil_group_and_hour`
 
 ### 4.2 all 정의
 - `all`은 원천의 `dimension_type = all(or null)` 기준 집계값으로 생성
@@ -46,6 +54,7 @@
 
 ## 5. API 계약
 - `GET /api/metrics`
+- `GET /api/measurement-units`
 - `GET /api/weeks?n=...`
 - `GET /api/filter-options?measureUnit=...`
 - `POST /api/heatmap`
@@ -55,6 +64,7 @@
 제약:
 - 기존 응답 shape 유지
 - 집계 정확도 규칙 우선
+- 확장 측정단위는 운영 DB 자원 상황에 따라 MV 대신 원천 조회 경로를 사용할 수 있음
 
 ## 6. 성능/캐시 정책
 - `/api/weeks`: 강한 캐시
@@ -201,6 +211,33 @@
   - DB 직결 헬스체크 전환 후 워크플로 재실행 결과 확인
   - `actions/checkout@v5`, `actions/setup-node@v5` 반영 후 워크플로 annotation 경고 제거 확인
   - pooler URI 형식/인코딩/sslmode 점검
+
+### 7.12 2026-03-14 측정단위 확장 및 드릴다운 재설계
+- 측정단위 확장:
+  - 검색 옵션의 `측정단위`는 고정 리스트가 아니라 `dimension_type` 기반 동적 목록으로 제공
+  - 신규 지원 단위:
+    - `area_group_and_time`, `area_and_time`
+    - `stadium_group_and_time`, `stadium_and_time`
+    - `time`, `hour`
+    - `yoil_and_hour`, `yoil_group_and_hour`
+- 드릴다운 UX:
+  - 엔티티 셀 클릭 시 셀 아래에 드롭다운 리스트를 띄우고, 선택 즉시 드릴다운
+  - 별도 `드릴다운` 확인 버튼 없이 헤더 엔티티 필터와 동일한 리스트 UI 재사용
+  - 드릴다운 옵션은 단순/복합 단위를 함께 보여주되, 실제 조회는 부모 단위와 대상 단위 조합을 만족하는 최소 그레인으로 자동 매핑
+  - 예시:
+    - `time -> area_group`는 내부적으로 `area_group_and_time` 원천 데이터를 사용해 `area_group` 기준 결과를 생성
+    - `time -> area`는 내부적으로 `area_and_time` 원천 데이터를 사용
+- 조회 경로 정책:
+  - legacy 단위(`all/area_group/area/stadium_group/stadium`)는 `weekly_agg_mv` 우선 유지
+  - 확장 단위의 필터 옵션과 heatmap은 선택된 최근 주차 범위 기준 원천 테이블 직접 조회
+  - `GET /api/filter-options`는 `week` 파라미터를 받아 확장 단위 범위를 축소해 로딩 시간과 timeout을 완화
+- 운영 DB 반영:
+  - `supabase/migrations/202603140003_add_indexes_for_expanded_dimension_queries.sql` 적용
+  - 목적:
+    - 확장 단위 원천조회 경로(`dimension_type`, `week`, entity columns`) 최적화
+- 운영 제약:
+  - `weekly_agg_mv`를 확장 단위까지 직접 포함시키는 재생성 SQL은 원격 DB에서 temp disk 부족으로 실패
+  - 따라서 확장 단위는 현재 MV 확장 대신 원천 조회 + 인덱스 전략을 운영 기준으로 사용
 
 ## 8. 운영 도메인 원칙
 - Canonical 운영 도메인은 단일값만 사용:

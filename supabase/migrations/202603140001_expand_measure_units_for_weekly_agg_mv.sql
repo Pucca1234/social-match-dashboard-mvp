@@ -1,7 +1,6 @@
--- Weekly rebuild for analytic MV after Airbyte overwrite/refresh cycles.
--- Aggregation rule:
--- - *_rate metrics -> AVG
--- - other metrics  -> MAX
+-- Expand weekly_agg_mv to support additional dimension_type-based measure units.
+-- This mirrors supabase/sql/refresh_weekly_agg_mv.sql so scheduled/manual rebuilds and
+-- migration-based rollout stay aligned.
 
 create or replace view bigquery.weeks_view as
 select distinct
