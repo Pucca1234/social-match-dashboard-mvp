@@ -239,6 +239,39 @@ npm run data:validate-recent-refresh
   - `area_and_time` 필터 옵션/heatmap 약 4~5초대
   - `npm run build` 통과
 
+## 2026-03-18 확장 단위 성능/드릴다운 안정화
+- 측정단위 라벨 변경:
+  - `stadium_group` 표시명 `구장그룹` -> `구장`
+  - `stadium` 표시명 `구장` -> `면`
+  - 복합 단위도 동일 규칙 반영:
+    - `stadium_group_and_time` -> `구장 타임`
+    - `stadium_and_time` -> `면 타임`
+- 확장 단위 집계 경로 재구성:
+  - 원격 DB에 최근 24주 기준 `bigquery.weekly_expanded_agg_mv` 추가
+  - 파일:
+    - `supabase/migrations/202603180001_add_weekly_expanded_agg_mv.sql`
+    - `supabase/migrations/202603180002_enrich_weekly_expanded_agg_mv_parent_dimensions.sql`
+  - 목적:
+    - `area_group_and_time`, `area_and_time`, `stadium_group_and_time`, `stadium_and_time`, `time`, `hour`, `yoil_*` 조회를 raw source fallback 대신 recent MV 우선 경로로 전환
+  - parent drilldown 대응:
+    - `entity_hierarchy_mv`를 활용해 `stadium_group_and_time`, `stadium_and_time`, `area_and_time` row에도 상위 지역 축(`area_group`, `area`, `stadium_group`)을 보강
+    - `measure_unit + metric_id + week + parent columns` 복합 인덱스 추가
+- API/프론트 보강:
+  - `GET /api/drilldown-options` 추가:
+    - 엔티티 클릭 시 실제 데이터가 있는 드릴다운 단위만 단일 요청으로 조회
+  - `/api/filter-options` 캐시 키에 `week/parent context` 포함
+  - `/api/weeks`의 `unstable_cache` 제거:
+    - Airbyte 화요일 적재 후 최신 주차(`26.03.16 - 03.22`) 노출 지연 방지
+  - 클라이언트 드릴다운 옵션 캐시는 현재 parent/filter/week context까지 포함하도록 보강
+- 2026-03-18 기준 확인:
+  - source 최신 `_airbyte_extracted_at`: `2026-03-17T00:07:11.295+00:00`
+  - `npm run data:validate-recent-refresh` 기준 최신 3주(`26.03.16 - 03.22` 포함) 정상
+  - 로컬 API 재현:
+    - `area_group_and_time` 12주 heatmap: 약 0.4~0.7초
+    - 같은 조건 filter options: 약 0.02~0.15초
+    - 같은 조건 drilldown options: 약 0.03~0.22초
+  - 특정 조합(예: `area_group_and_time=경기 | A 평일 비프라임(-17)` -> `stadium_group_and_time`)은 timeout이 아니라 실제 `0 rows` 조합으로 정리되었고, 드릴다운 옵션 노출은 서버 재기동/새로고침 후 최신 결과 기준으로 동작
+
 ## Supabase 배포 워크플로
 - 마이그레이션: `supabase/migrations/202602210001_weekly_agg_mv_v2.sql`
 - 마이그레이션: `supabase/migrations/202602220001_weekly_agg_mv_filter_options_idx.sql`

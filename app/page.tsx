@@ -115,43 +115,53 @@ type DrilldownHistoryItem = {
 type PendingDrilldown = {
   entityName: string;
   sourceUnit: MeasurementUnit;
+  options: MeasurementUnitOption[];
+  isLoading: boolean;
 } | null;
 
-const drilldownColumnsByUnit: Record<string, string[]> = {
-  area_group: ["area_group"],
-  area: ["area"],
-  area_group_and_time: ["area_group", "time"],
-  area_and_time: ["area", "time"],
-  stadium_group: ["stadium_group"],
-  stadium: ["stadium"],
-  stadium_group_and_time: ["stadium_group", "time"],
-  stadium_and_time: ["stadium", "time"],
-  time: ["time"],
-  hour: ["hour"],
-  yoil_and_hour: ["yoil", "hour"],
-  yoil_group_and_hour: ["yoil_group", "hour"]
+const drilldownCandidateMap: Record<string, string[]> = {
+  all: [
+    "area_group",
+    "area",
+    "area_group_and_time",
+    "area_and_time",
+    "stadium_group",
+    "stadium",
+    "stadium_group_and_time",
+    "stadium_and_time",
+    "time",
+    "hour",
+    "yoil_and_hour",
+    "yoil_group_and_hour"
+  ],
+  area_group: [
+    "area",
+    "area_group_and_time",
+    "area_and_time",
+    "stadium_group",
+    "stadium",
+    "stadium_group_and_time",
+    "stadium_and_time"
+  ],
+  area: ["area_and_time", "stadium_group", "stadium", "stadium_group_and_time", "stadium_and_time"],
+  area_group_and_time: ["area", "area_and_time", "stadium_group", "stadium", "stadium_group_and_time", "stadium_and_time"],
+  area_and_time: ["stadium_group", "stadium", "stadium_group_and_time", "stadium_and_time"],
+  stadium_group: ["stadium", "stadium_group_and_time", "stadium_and_time"],
+  stadium: ["stadium_and_time"],
+  stadium_group_and_time: ["stadium", "stadium_and_time"],
+  stadium_and_time: [],
+  time: ["area_group", "area", "area_group_and_time", "area_and_time", "stadium_group", "stadium", "stadium_group_and_time", "stadium_and_time"],
+  hour: ["yoil_and_hour", "yoil_group_and_hour"],
+  yoil_group_and_hour: ["yoil_and_hour"],
+  yoil_and_hour: []
 };
 
 const getDrilldownOptionsForSource = (
   sourceUnit: MeasurementUnit,
   options: MeasurementUnitOption[]
 ) => {
-  const sourceColumns = drilldownColumnsByUnit[sourceUnit] ?? [];
-  return options.filter((option) => {
-    if (option.value === "all" || option.value === sourceUnit) return false;
-    const optionColumns = drilldownColumnsByUnit[option.value] ?? [];
-    if (sourceColumns.length === 0 || optionColumns.length <= 1) return true;
-    if (!sourceColumns.every((column) => optionColumns.includes(column))) return true;
-
-    const remainingColumns = optionColumns.filter((column) => !sourceColumns.includes(column));
-    if (remainingColumns.length !== 1) return true;
-
-    return !options.some((candidate) => {
-      if (candidate.value === option.value) return false;
-      const candidateColumns = drilldownColumnsByUnit[candidate.value] ?? [];
-      return candidateColumns.length === 1 && candidateColumns[0] === remainingColumns[0];
-    });
-  });
+  const candidateIds = new Set(drilldownCandidateMap[sourceUnit] ?? []);
+  return options.filter((option) => candidateIds.has(option.value));
 };
 
 
@@ -240,6 +250,8 @@ export default function Home() {
   const [drilldownParent, setDrilldownParent] = useState<DrilldownParent>(null);
   const [appliedDrilldownHistory, setAppliedDrilldownHistory] = useState<DrilldownHistoryItem[]>([]);
   const [pendingDrilldown, setPendingDrilldown] = useState<PendingDrilldown>(null);
+  const pendingDrilldownRequestRef = useRef(0);
+  const drilldownOptionsCacheRef = useRef(new Map<string, MeasurementUnitOption[]>());
 
   const [weeks, setWeeks] = useState<string[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
@@ -267,6 +279,16 @@ export default function Home() {
 
   const [autoSearchPending, setAutoSearchPending] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(true);
+
+  useEffect(() => {
+    drilldownOptionsCacheRef.current.clear();
+  }, [
+    appliedMeasurementUnit,
+    appliedFilterValue,
+    drilldownParent?.unit,
+    drilldownParent?.value,
+    weeks.join("|")
+  ]);
 
   const measurementUnitLabelMap = useMemo(
     () =>
@@ -703,10 +725,65 @@ export default function Home() {
     }
     const nextUnitOptions = getDrilldownOptionsForSource(appliedMeasurementUnit, measurementUnitOptions);
     if (nextUnitOptions.length === 0) return;
+    const cacheKey = [
+      appliedMeasurementUnit,
+      appliedFilterValue,
+      drilldownParent?.unit ?? "root",
+      drilldownParent?.value ?? "root",
+      entityName,
+      ...weeks,
+      ...nextUnitOptions.map((option) => option.value)
+    ].join("|");
+    const cachedOptions = drilldownOptionsCacheRef.current.get(cacheKey);
+    if (cachedOptions) {
+      setPendingDrilldown({
+        entityName,
+        sourceUnit: appliedMeasurementUnit,
+        options: cachedOptions,
+        isLoading: false
+      });
+      return;
+    }
+    const requestId = Date.now();
+    pendingDrilldownRequestRef.current = requestId;
     setPendingDrilldown({
       entityName,
-      sourceUnit: appliedMeasurementUnit
+      sourceUnit: appliedMeasurementUnit,
+      options: [],
+      isLoading: true
     });
+
+    void (async () => {
+      const params = new URLSearchParams({
+        sourceUnit: appliedMeasurementUnit,
+        sourceValue: entityName
+      });
+      nextUnitOptions.forEach((option) => params.append("candidate", option.value));
+      weeks.forEach((week) => params.append("week", week));
+
+      let availableOptions: MeasurementUnitOption[] = [];
+      try {
+        const response = await fetchJsonWithTimeout<{ options: MeasurementUnitOption[] }>(
+          `/api/drilldown-options?${params.toString()}`,
+          10000
+        );
+        availableOptions = response.options ?? [];
+      } catch {
+        availableOptions = [];
+      }
+      if (pendingDrilldownRequestRef.current !== requestId) return;
+
+      drilldownOptionsCacheRef.current.set(cacheKey, availableOptions);
+      setPendingDrilldown((prev) =>
+        prev && prev.entityName === entityName
+          ? {
+              ...prev,
+              options: availableOptions,
+              isLoading: false
+            }
+          : prev
+      );
+    })();
   };
 
   const handleEntityFilterSelect = (nextValue: string) => {
@@ -1154,10 +1231,8 @@ export default function Home() {
                 drilldownPathItems={drilldownPathItems}
                 onDrilldownNavigate={handleDrilldownNavigate}
                 expandedEntityName={pendingDrilldown?.entityName ?? null}
-                drilldownUnitOptions={getDrilldownOptionsForSource(
-                  pendingDrilldown?.sourceUnit ?? appliedMeasurementUnit,
-                  measurementUnitOptions
-                )}
+                drilldownUnitOptions={pendingDrilldown?.options ?? []}
+                isDrilldownOptionsLoading={pendingDrilldown?.isLoading ?? false}
                 onDrilldownSelect={handlePendingDrilldownSelect}
                 onDrilldownClose={() => setPendingDrilldown(null)}
               />

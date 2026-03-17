@@ -20,6 +20,7 @@ type EntityMetricTableProps = {
   onDrilldownNavigate?: (targetIndex: number) => void;
   expandedEntityName?: string | null;
   drilldownUnitOptions?: MeasurementUnitOption[];
+  isDrilldownOptionsLoading?: boolean;
   onDrilldownSelect?: (value: string) => void;
   onDrilldownClose?: () => void;
 };
@@ -59,6 +60,7 @@ export default function EntityMetricTable({
   onDrilldownNavigate,
   expandedEntityName,
   drilldownUnitOptions = [],
+  isDrilldownOptionsLoading = false,
   onDrilldownSelect,
   onDrilldownClose
 }: EntityMetricTableProps) {
@@ -281,7 +283,9 @@ export default function EntityMetricTable({
                             className="entity-drilldown-menu entity-filter-menu"
                             onClick={(event) => event.stopPropagation()}
                           >
-                            {drilldownUnitOptions.length > 0 ? (
+                            {isDrilldownOptionsLoading ? (
+                              <div className="entity-drilldown-empty">드릴다운 옵션 확인 중...</div>
+                            ) : drilldownUnitOptions.length > 0 ? (
                               drilldownUnitOptions.map((option) => (
                                 <button
                                   key={option.value}

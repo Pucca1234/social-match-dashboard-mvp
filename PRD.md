@@ -239,6 +239,47 @@
   - `weekly_agg_mv`를 확장 단위까지 직접 포함시키는 재생성 SQL은 원격 DB에서 temp disk 부족으로 실패
   - 따라서 확장 단위는 현재 MV 확장 대신 원천 조회 + 인덱스 전략을 운영 기준으로 사용
 
+### 7.13 2026-03-18 확장 단위 MV 전환 및 최신 주차 노출 보정
+- 측정단위 표시명 변경:
+  - `stadium_group` -> `구장`
+  - `stadium` -> `면`
+  - `stadium_group_and_time` -> `구장 타임`
+  - `stadium_and_time` -> `면 타임`
+- 확장 단위 집계 전략 변경:
+  - 기존 원칙:
+    - 확장 단위는 원천 조회 + 인덱스 fallback
+  - 현재 원칙:
+    - 최근 24주 범위의 확장 단위는 `bigquery.weekly_expanded_agg_mv` 우선 사용
+    - legacy 단위는 계속 `bigquery.weekly_agg_mv` 우선 사용
+  - 신규 migration:
+    - `supabase/migrations/202603180001_add_weekly_expanded_agg_mv.sql`
+    - `supabase/migrations/202603180002_enrich_weekly_expanded_agg_mv_parent_dimensions.sql`
+- `weekly_expanded_agg_mv` 설계:
+  - 대상 단위:
+    - `area_group_and_time`, `area_and_time`
+    - `stadium_group_and_time`, `stadium_and_time`
+    - `time`, `hour`
+    - `yoil_and_hour`, `yoil_group_and_hour`
+  - 최근 24주만 유지
+  - 상위 드릴다운 parent 대응을 위해 `entity_hierarchy_mv` 기반 지역 축(`area_group`, `area`, `stadium_group`)을 child row에 보강
+  - parent filter 최적화를 위해 `measure_unit + metric_id + week + parent columns` 복합 인덱스 추가
+- API/캐시 정책 변경:
+  - `GET /api/drilldown-options` 추가:
+    - 엔티티 클릭 시 실제 데이터가 있는 드릴다운 단위만 노출
+    - 다중 `filter-options` 호출 대신 단일 존재성 체크 요청 사용
+  - `GET /api/filter-options` 캐시 키는 `measureUnit + parent context + weeks` 기준으로 분기
+  - `GET /api/weeks`는 1시간 `unstable_cache`를 제거
+    - 이유:
+      - Airbyte 화요일 적재 직후 최신 주차가 DB에는 있으나 API가 이전 주차를 계속 반환하는 현상 방지
+  - 클라이언트 드릴다운 옵션 캐시는 `sourceUnit + sourceValue + parent/filter/week context`를 모두 포함
+- 운영 확인:
+  - source 최신 적재 시각 확인:
+    - `_airbyte_extracted_at = 2026-03-17T00:07:11.295+00:00`
+  - `data:validate-recent-refresh` 기준 최근 3주(`26.03.16 - 03.22`, `26.03.09 - 03.15`, `26.03.02 - 03.08`) 정상
+  - `/api/weeks?n=8`은 현재 최신 주차 `26.03.16 - 03.22`를 즉시 반환
+  - 특정 parent/child 조합은 timeout이 아니라 실제 `0 rows` 조합으로 정리:
+    - 예: `area_group_and_time=경기 | A 평일 비프라임(-17)` -> `stadium_group_and_time`
+
 ## 8. 운영 도메인 원칙
 - Canonical 운영 도메인은 단일값만 사용:
   - `https://social-match-dashboard-mvp.vercel.app`

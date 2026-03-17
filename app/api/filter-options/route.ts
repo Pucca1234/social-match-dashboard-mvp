@@ -27,10 +27,11 @@ export async function GET(request: Request) {
   try {
     const normalizedParentValue = parentValue && parentValue.trim().length > 0 ? parentValue.trim() : null;
     const normalizedParentUnit = parentUnit && parentUnit !== "all" ? parentUnit : null;
+    const weeksKey = weeks.join("|") || "all-weeks";
     const cacheSuffix =
       normalizedParentUnit && normalizedParentValue
-        ? `${normalizedParentUnit}:${normalizedParentValue}`
-        : "none";
+        ? `${normalizedParentUnit}:${normalizedParentValue}:${weeksKey}`
+        : `none:${weeksKey}`;
     const getFilterOptionsCached = unstable_cache(
       async () => {
         const options = await getFilterOptions(measureUnit, {
