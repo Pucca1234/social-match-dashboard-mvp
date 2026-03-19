@@ -2353,6 +2353,33 @@ main {
   line-height: 1.6;
 }
 
+.agent-h3 {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 10px 0 4px;
+  color: var(--ink);
+}
+.agent-h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 8px 0 2px;
+  color: var(--ink);
+}
+.agent-p {
+  margin: 0;
+}
+.agent-li {
+  margin-left: 16px;
+  list-style-position: outside;
+}
+.agent-text-block ul,
+.agent-text-block ol {
+  margin: 0;
+  padding: 0;
+}
+.agent-spacer {
+  height: 6px;
+}
 .agent-inline-code {
   background: var(--bg-deep);
   padding: 1px 5px;

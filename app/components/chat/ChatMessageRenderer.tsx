@@ -43,13 +43,35 @@ function parseInline(text: string): ReactNode[] {
   return nodes;
 }
 
+function renderLine(line: string, key: number) {
+  // headings
+  if (line.startsWith("### ")) {
+    return <h4 key={key} className="agent-h4">{parseInline(line.slice(4))}</h4>;
+  }
+  if (line.startsWith("## ")) {
+    return <h3 key={key} className="agent-h3">{parseInline(line.slice(3))}</h3>;
+  }
+  if (line.startsWith("# ")) {
+    return <h3 key={key} className="agent-h3">{parseInline(line.slice(2))}</h3>;
+  }
+  // unordered list
+  if (/^[-*] /.test(line)) {
+    return <li key={key} className="agent-li">{parseInline(line.slice(2))}</li>;
+  }
+  // ordered list
+  const olMatch = line.match(/^(\d+)\.\s/);
+  if (olMatch) {
+    return <li key={key} className="agent-li" value={Number(olMatch[1])}>{parseInline(line.slice(olMatch[0].length))}</li>;
+  }
+  // empty line → spacer
+  if (!line.trim()) {
+    return <div key={key} className="agent-spacer" />;
+  }
+  return <p key={key} className="agent-p">{parseInline(line)}</p>;
+}
+
 function renderTextBlock(content: string) {
-  return content.split("\n").map((line, j, arr) => (
-    <span key={j}>
-      {parseInline(line)}
-      {j < arr.length - 1 && <br />}
-    </span>
-  ));
+  return content.split("\n").map((line, j) => renderLine(line, j));
 }
 
 export default function ChatMessageRenderer({ blocks, onRecommendationSelect }: Props) {
