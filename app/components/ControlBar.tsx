@@ -102,6 +102,80 @@ export default function ControlBar({
 
   return (
     <div className="search-panel card">
+      <div className="search-row search-row-metrics">
+        <button type="button" className="btn-secondary search-metric-picker-btn" onClick={onOpenMetricPicker}>
+          지표 선택
+        </button>
+        <span className="field-label">활성 지표</span>
+        <div className="selected-metric-chips">
+          {selectedMetrics.map((metric) => (
+            <button
+              key={metric.id}
+              type="button"
+              className="selected-metric-chip is-active"
+              title={`${metric.description || metric.name} (클릭 시 해제)`}
+              onClick={() => onRemoveSelectedMetric(metric.id)}
+              aria-pressed
+            >
+              {metric.name}
+            </button>
+          ))}
+        </div>
+        <button type="button" className="clear-metrics-btn" onClick={onClearSelectedMetrics}>
+          전체 해제
+        </button>
+      </div>
+
+      <div className="search-row search-row-main">
+        <div className="filter-group-period">
+          <label className="field search-field search-field-period-unit">
+            <span className="field-label">기간단위</span>
+            <select value={periodUnit} disabled>
+              <option value="week">주</option>
+            </select>
+          </label>
+          <label className="field search-field search-field-period-range">
+            <span className="field-label">기간범위</span>
+            <select value={periodRangeValue} onChange={(event) => onPeriodRangeChange(event.target.value)}>
+              {periodRangeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="filter-divider" />
+        <label className="field search-field search-field-measurement-select">
+          <span className="field-label">측정단위</span>
+          <select value={measurementUnit} onChange={(event) => onMeasurementUnitChange(event.target.value)}>
+            {measurementUnitOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field search-field search-field-filter">
+          <span className="field-label">필터</span>
+          <select value={filterValue} onChange={(event) => onFilterChange(event.target.value)}>
+            {filterOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" className="btn-ghost btn-reset" onClick={onResetFilters} title="필터 초기화">
+          초기화
+        </button>
+        <div className="search-action-group">
+          <button type="button" className="btn-primary search-submit-btn" onClick={onSearch} disabled={isSearchDisabled}>
+            조회
+          </button>
+        </div>
+      </div>
+
       <div className="search-row search-row-template surface-sunken">
         <div className="template-section" ref={dropdownRef}>
           <span className="field-label">템플릿</span>
@@ -223,80 +297,6 @@ export default function ControlBar({
             </div>
           )}
         </div>
-      </div>
-
-      <div className="search-row search-row-main">
-        <div className="filter-group-period">
-          <label className="field search-field search-field-period-unit">
-            <span className="field-label">기간단위</span>
-            <select value={periodUnit} disabled>
-              <option value="week">주</option>
-            </select>
-          </label>
-          <label className="field search-field search-field-period-range">
-            <span className="field-label">기간범위</span>
-            <select value={periodRangeValue} onChange={(event) => onPeriodRangeChange(event.target.value)}>
-              {periodRangeOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className="filter-divider" />
-        <label className="field search-field search-field-measurement-select">
-          <span className="field-label">측정단위</span>
-          <select value={measurementUnit} onChange={(event) => onMeasurementUnitChange(event.target.value)}>
-            {measurementUnitOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field search-field search-field-filter">
-          <span className="field-label">필터</span>
-          <select value={filterValue} onChange={(event) => onFilterChange(event.target.value)}>
-            {filterOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="button" className="btn-ghost btn-reset" onClick={onResetFilters} title="필터 초기화">
-          초기화
-        </button>
-        <div className="search-action-group">
-          <button type="button" className="btn-primary search-submit-btn" onClick={onSearch} disabled={isSearchDisabled}>
-            조회
-          </button>
-        </div>
-      </div>
-
-      <div className="search-row search-row-metrics">
-        <button type="button" className="btn-secondary search-metric-picker-btn" onClick={onOpenMetricPicker}>
-          지표 선택
-        </button>
-        <span className="field-label">활성 지표</span>
-        <div className="selected-metric-chips">
-          {selectedMetrics.map((metric) => (
-            <button
-              key={metric.id}
-              type="button"
-              className="selected-metric-chip is-active"
-              title={`${metric.description || metric.name} (클릭 시 해제)`}
-              onClick={() => onRemoveSelectedMetric(metric.id)}
-              aria-pressed
-            >
-              {metric.name}
-            </button>
-          ))}
-        </div>
-        <button type="button" className="clear-metrics-btn" onClick={onClearSelectedMetrics}>
-          전체 해제
-        </button>
       </div>
 
       {isSaveDialogOpen && (
