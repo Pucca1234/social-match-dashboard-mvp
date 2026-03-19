@@ -55,7 +55,7 @@ export default function MetricTable({
   onShowDeltaChange
 }: MetricTableProps) {
   const weekColumnCount = weeks.length;
-  const defaultWidths = useMemo(() => [220, 140, ...Array(weekColumnCount).fill(120)], [weekColumnCount]);
+  const defaultWidths = useMemo(() => [180, 100, ...Array(weekColumnCount).fill(100)], [weekColumnCount]);
   const [columnWidths, setColumnWidths] = useState<number[]>(defaultWidths);
   const resizeIndexRef = useRef<number | null>(null);
   const startXRef = useRef(0);

@@ -65,7 +65,7 @@ export default function EntityMetricTable({
   onDrilldownClose
 }: EntityMetricTableProps) {
   const weekColumnCount = weeks.length;
-  const defaultWidths = useMemo(() => [180, 120, 120, ...Array(weekColumnCount).fill(120)], [weekColumnCount]);
+  const defaultWidths = useMemo(() => [140, 100, 90, ...Array(weekColumnCount).fill(100)], [weekColumnCount]);
   const [columnWidths, setColumnWidths] = useState<number[]>(defaultWidths);
   const resizeIndexRef = useRef<number | null>(null);
   const startXRef = useRef(0);

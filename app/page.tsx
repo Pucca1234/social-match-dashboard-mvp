@@ -1122,7 +1122,7 @@ export default function Home() {
     <main className={`app-shell${isChatOpen ? " chat-open" : ""}`}>
       <header className="app-header">
         <div className="brand">
-          <svg className="brand-mark" width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+          <svg className="brand-mark" width="24" height="24" viewBox="0 0 36 36" fill="none" aria-hidden="true">
             <rect width="36" height="36" rx="10" fill="var(--primary)" />
             <path d="M10 26V10L18 18L26 10V26" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
           </svg>
