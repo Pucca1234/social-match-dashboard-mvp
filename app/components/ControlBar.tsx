@@ -33,6 +33,7 @@ type ControlBarProps = {
   onRenameTemplate: (id: string, name: string) => void;
   onSetDefaultTemplate: (id: string) => void;
   onResetFilters: () => void;
+  onApplyDefault: () => void;
 };
 
 export default function ControlBar({
@@ -59,28 +60,29 @@ export default function ControlBar({
   onDeleteTemplate,
   onRenameTemplate,
   onSetDefaultTemplate,
-  onResetFilters
+  onResetFilters,
+  onApplyDefault
 }: ControlBarProps) {
-  const [isTemplateDropdownOpen, setIsTemplateDropdownOpen] = useState(false);
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
   const [saveIsShared, setSaveIsShared] = useState(false);
   const [saveIsDefault, setSaveIsDefault] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [contextMenuId, setContextMenuId] = useState<string | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsTemplateDropdownOpen(false);
+      if (contextMenuRef.current && !contextMenuRef.current.contains(event.target as Node)) {
+        setContextMenuId(null);
       }
     };
-    if (isTemplateDropdownOpen) {
+    if (contextMenuId) {
       document.addEventListener("mousedown", handleClickOutside);
     }
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isTemplateDropdownOpen]);
+  }, [contextMenuId]);
 
   const handleSave = () => {
     if (!saveName.trim()) return;
@@ -101,7 +103,86 @@ export default function ControlBar({
   const currentUserId = templates.find((template) => template.id === activeTemplateId)?.user_id;
 
   return (
-    <div className="search-panel card">
+    <div className="control-bar-wrap">
+      <div className="template-tabs">
+        <button
+          type="button"
+          className={`template-tab template-tab-default ${activeTemplateId === null ? "is-active" : ""}`}
+          onClick={onApplyDefault}
+        >
+          기본
+        </button>
+        {templates.map((template) => (
+          <div key={template.id} className="template-tab-wrap" style={{ position: "relative" }}>
+            {editingId === template.id ? (
+              <div className="template-tab-edit">
+                <input
+                  type="text"
+                  className="template-tab-edit-input"
+                  value={editingName}
+                  onChange={(event) => setEditingName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") handleRename(template.id);
+                    if (event.key === "Escape") setEditingId(null);
+                  }}
+                  autoFocus
+                />
+                <button type="button" className="template-tab-edit-ok" onClick={() => handleRename(template.id)}>
+                  OK
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className={`template-tab ${template.id === activeTemplateId ? "is-active" : ""}`}
+                onClick={() => onApplyTemplate(template)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setContextMenuId(template.id);
+                }}
+                title={`${template.name}${template.is_default ? " (기본)" : ""}${template.is_shared ? " (공유)" : ""} — 우클릭: 관리`}
+              >
+                <span className="template-tab-name">{template.name}</span>
+                {template.is_default && <span className="template-tab-badge">기본</span>}
+              </button>
+            )}
+            {contextMenuId === template.id && (
+              <div className="template-tab-context" ref={contextMenuRef}>
+                {!template.is_default && (
+                  <button
+                    type="button"
+                    onClick={() => { onSetDefaultTemplate(template.id); setContextMenuId(null); }}
+                  >
+                    기본 설정
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => { setEditingId(template.id); setEditingName(template.name); setContextMenuId(null); }}
+                >
+                  이름 수정
+                </button>
+                <button
+                  type="button"
+                  className="template-tab-context-delete"
+                  onClick={() => { onDeleteTemplate(template.id); setContextMenuId(null); }}
+                >
+                  삭제
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+        <button
+          type="button"
+          className="template-tab template-tab-add"
+          onClick={() => setIsSaveDialogOpen(true)}
+          title="현재 필터를 템플릿으로 저장"
+        >
+          +
+        </button>
+      </div>
+      <div className="search-panel card control-bar-body">
       <div className="search-row search-row-metrics">
         <button type="button" className="btn-secondary search-metric-picker-btn" onClick={onOpenMetricPicker}>
           지표 선택
@@ -176,127 +257,6 @@ export default function ControlBar({
         </div>
       </div>
 
-      <div className="search-row search-row-template surface-sunken">
-        <div className="template-section" ref={dropdownRef}>
-          <span className="field-label">템플릿</span>
-          <div className="template-controls">
-            <button
-              type="button"
-              className={`btn-template-select ${isTemplateDropdownOpen ? "is-open" : ""}`}
-              onClick={() => setIsTemplateDropdownOpen((prev) => !prev)}
-            >
-              {activeTemplateId
-                ? templates.find((template) => template.id === activeTemplateId)?.name ?? "선택"
-                : "선택"}
-              <span className="template-caret" />
-            </button>
-            <button
-              type="button"
-              className="btn-template-save"
-              onClick={() => setIsSaveDialogOpen(true)}
-              title="현재 필터를 템플릿으로 저장"
-            >
-              저장
-            </button>
-          </div>
-
-          {isTemplateDropdownOpen && (
-            <div className="template-dropdown">
-              {templates.length === 0 ? (
-                <div className="template-dropdown-empty">저장된 템플릿이 없습니다.</div>
-              ) : (
-                templates.map((template) => (
-                  <div
-                    key={template.id}
-                    className={`template-dropdown-item ${template.id === activeTemplateId ? "is-active" : ""}`}
-                  >
-                    {editingId === template.id ? (
-                      <div className="template-edit-row">
-                        <input
-                          type="text"
-                          className="template-edit-input"
-                          value={editingName}
-                          onChange={(event) => setEditingName(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") handleRename(template.id);
-                            if (event.key === "Escape") setEditingId(null);
-                          }}
-                          autoFocus
-                        />
-                        <button
-                          type="button"
-                          className="template-action-btn"
-                          onClick={() => handleRename(template.id)}
-                        >
-                          확인
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          className="template-dropdown-name"
-                          onClick={() => {
-                            onApplyTemplate(template);
-                            setIsTemplateDropdownOpen(false);
-                          }}
-                        >
-                          <span className="template-name-text">{template.name}</span>
-                          <span className="template-badges">
-                            {template.is_default && <span className="template-badge template-badge-default">기본</span>}
-                            {template.is_shared && <span className="template-badge template-badge-shared">공유</span>}
-                          </span>
-                        </button>
-                        <div className="template-item-actions">
-                          {(!currentUserId || template.user_id === currentUserId) && (
-                            <>
-                              {!template.is_default && (
-                                <button
-                                  type="button"
-                                  className="template-action-btn"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    onSetDefaultTemplate(template.id);
-                                  }}
-                                  title="기본 템플릿으로 설정"
-                                >
-                                  기본
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                className="template-action-btn"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setEditingId(template.id);
-                                  setEditingName(template.name);
-                                }}
-                                title="이름 수정"
-                              >
-                                수정
-                              </button>
-                              <button
-                                type="button"
-                                className="template-action-btn template-action-delete"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  onDeleteTemplate(template.id);
-                                }}
-                                title="삭제"
-                              >
-                                삭제
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
       </div>
 
       {isSaveDialogOpen && (

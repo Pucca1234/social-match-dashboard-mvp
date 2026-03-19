@@ -459,8 +459,8 @@ export default function Home() {
           format: getMetricFormat(row.metric)
         }));
         setMetrics(mappedMetrics);
-        const defaultIds = pickDefaultMetricIds(mappedMetrics.map((metric) => metric.id));
-        setSelectedMetricIds(defaultIds);
+        // 디폴트: 빈값 (사용자가 직접 선택)
+        setSelectedMetricIds([]);
       } catch (error) {
         if (!canceled) {
           const message = (error as Error).message;
@@ -487,9 +487,7 @@ export default function Home() {
   const hasInitializedMetrics = useRef(false);
   useEffect(() => {
     if (!metrics.length || hasInitializedMetrics.current) return;
-    if (!selectedMetricIds.length) {
-      setSelectedMetricIds(pickDefaultMetricIds(metrics.map((metric) => metric.id)));
-    }
+    // 디폴트: 빈값 유지
     hasInitializedMetrics.current = true;
   }, [metrics]);
 
@@ -1045,6 +1043,7 @@ export default function Home() {
 
   const handleApplyTemplate = (template: FilterTemplate) => {
     applyTemplateConfig(template);
+    setAutoSearchPending(true);
   };
 
   const handleSaveTemplate = async (name: string, isShared: boolean, isDefault: boolean) => {
@@ -1192,8 +1191,19 @@ export default function Home() {
             setDrilldownParent(null);
             setAppliedDrilldownHistory([]);
             setPendingDrilldown(null);
-            setSelectedMetricIds(preferredDefaultMetricIds.filter((id) => metrics.some((m) => m.id === id)));
+            setSelectedMetricIds([]);
             setActiveTemplateId(null);
+          }}
+          onApplyDefault={() => {
+            setPeriodRangeValue("recent_8");
+            setMeasurementUnit("all");
+            setFilterValue(ALL_VALUE);
+            setDrilldownParent(null);
+            setAppliedDrilldownHistory([]);
+            setPendingDrilldown(null);
+            setSelectedMetricIds([]);
+            setActiveTemplateId(null);
+            setAutoSearchPending(true);
           }}
         />
         {isLoadingFilter && <div className="card subtle">필터 로딩 중...</div>}
