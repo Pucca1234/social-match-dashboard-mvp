@@ -222,7 +222,7 @@ export default function ControlBar({
           }}
           title={activeTemplateId ? "현재 탭에 필터 상태 저장" : "새 탭에 현재 상태 저장"}
         >
-          저장하기
+          저장
         </button>
       </div>
       <div className="search-panel card control-bar-body">
