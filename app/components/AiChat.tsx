@@ -253,8 +253,8 @@ export default function AiChat({ onApplyFilters, dashboardContext, availableOpti
 
   if (!isOpen) {
     return (
-      <button type="button" className="ai-panel-toggle-btn" onClick={onToggle} aria-label="AI 채팅 열기">
-        AI
+      <button type="button" className="ai-panel-toggle-btn" onClick={onToggle} aria-label="Kevin AI 채팅 열기">
+        Kevin AI
       </button>
     );
   }
@@ -263,7 +263,7 @@ export default function AiChat({ onApplyFilters, dashboardContext, availableOpti
     <aside className="ai-side-panel">
       <div className="ai-panel-header">
         <div className="ai-panel-header-left">
-          <span className="ai-chat-header-title">AI</span>
+          <span className="ai-chat-header-title">Kevin AI</span>
         </div>
         <div className="ai-panel-header-actions">
           <button type="button" className="ai-panel-action-btn" onClick={handleNewSession} title="새 대화">
