@@ -36,12 +36,12 @@ const formatDelta = (metric: Metric, delta: number | null) => {
 };
 
 const getHeatColor = (values: number[], value: number) => {
-  if (!values.length) return "rgba(108, 171, 221, 0.04)";
+  if (!values.length) return "rgba(108, 171, 221, 0)";
   const min = Math.min(...values);
   const max = Math.max(...values);
-  if (min === max) return "rgba(108, 171, 221, 0.08)";
+  if (min === max) return "rgba(108, 171, 221, 0)";
   const ratio = (value - min) / (max - min);
-  const intensity = 0.04 + ratio * 0.25;
+  const intensity = ratio * 0.95;
   return `rgba(108, 171, 221, ${intensity})`;
 };
 
